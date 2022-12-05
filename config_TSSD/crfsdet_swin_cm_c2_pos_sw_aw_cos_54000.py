@@ -37,7 +37,7 @@ model = dict(
         num_outs=3),
     bbox_head=dict(
         type='BGMSRefineHead',
-        cdf_conv=dict(num_heads=1, num_samples=5, use_pos=False),
+        cdf_conv=dict(num_heads=1, num_samples=5, use_pos=True),
         auto_weighted_loss=True,
         sample_weight=True,
         num_classes=1,
@@ -95,7 +95,7 @@ lr_config = dict(
     warmup_iters=1000,
     warmup_ratio=0.001)
 #
-runner=dict(type='IterBasedRunner', max_iters=72000)
+runner=dict(type='IterBasedRunner', max_iters=54000)
 # checkpoint_config = dict(interval=12)
 checkpoint_config = dict(interval=3000)
 

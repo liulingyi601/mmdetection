@@ -37,7 +37,7 @@ model = dict(
         num_outs=3),
     bbox_head=dict(
         type='BGMSRefineHead',
-        cdf_conv=dict(num_heads=1, num_samples=5, use_pos=False),
+        cdf_conv=dict(num_heads=1, num_samples=5, use_pos=True),
         auto_weighted_loss=True,
         sample_weight=True,
         num_classes=1,
@@ -84,7 +84,26 @@ model = dict(
         max_per_img=100))
 find_unused_parameters=True
 # resume_from = '/data/data1/lxp/open-mmlab/mmdetection/work_dirs/crfsdet_r50_c1/latest.pth'
-# 
+img_norm_cfg = dict(
+    mean=[46.173172, 46.173172, 46.173172], std=[40.773808, 40.773808, 40.773808], to_rgb=True)
+train_pipeline = [
+    dict(type='LoadImageFromFile'),
+    dict(type='LoadAnnotations', with_bbox=True),
+    dict(
+        type='Resize',
+        img_scale=[(576, 576), (448,448)],
+        multiscale_mode='range',
+        keep_ratio=True),
+    dict(type='FilterAnnotations', min_gt_bbox_wh=[4, 4]),
+    dict(type='RandomFlip', flip_ratio=0.5,direction=['horizontal', 'vertical', 'diagonal']),
+    dict(type='RandomShift', shift_ratio=0.5, max_shift_px=32),
+    dict(type='Normalize', **img_norm_cfg),
+    dict(type='Pad', size_divisor=32),
+    dict(type='DefaultFormatBundle'),
+    dict(type='Collect', keys=['img', 'gt_bboxes', 'gt_labels']),
+]
+data = dict(
+    train=dict(pipeline=train_pipeline))
 optimizer = dict(type='SGD', lr=0.002, momentum=0.9, weight_decay=0.0001)
 optimizer_config = dict(grad_clip=None)
 lr_config = dict(
@@ -95,7 +114,7 @@ lr_config = dict(
     warmup_iters=1000,
     warmup_ratio=0.001)
 #
-runner=dict(type='IterBasedRunner', max_iters=72000)
+runner=dict(type='IterBasedRunner', max_iters=54000)
 # checkpoint_config = dict(interval=12)
 checkpoint_config = dict(interval=3000)
 
