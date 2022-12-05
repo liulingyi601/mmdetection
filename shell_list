@@ -1,0 +1,5 @@
+
+
+
+configs1=(crfsdet_swin_cm_c2_pos_stride_sw_aw_aug_cos_72000)
+nohup bash tools/train_list.sh 1,2 29001 ${configs1[*]} &>shell_train1.out & 2&>1 &

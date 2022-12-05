@@ -109,7 +109,7 @@ data
 .vscode
 .idea
 .DS_Store
-
+*.out
 # custom
 *.pkl
 *.pkl.json
