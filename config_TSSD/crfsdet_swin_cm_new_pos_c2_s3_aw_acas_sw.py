@@ -1,6 +1,6 @@
 _base_ = [
     './TSSD.py',
-    './_base_/default_runtime.py'
+    '../_base_/schedules/schedule_15e.py', '../_base_/default_runtime.py'
 ]
 INF = 1e8
 pretrained = 'https://github.com/SwinTransformer/storage/releases/download/v1.0.0/swin_tiny_patch4_window7_224.pth'  # noqa
@@ -39,6 +39,7 @@ model = dict(
         type='BGMSRefineHead',
         auto_weighted_loss=True,
         sample_weight=True,
+        bbox_weight_cfg='anchor',
         use_pos=True,
         num_classes=1,
         in_channels=256,
@@ -81,30 +82,6 @@ model = dict(
         score_thr=0.05,
         nms=dict(type='nms', iou_threshold=0.6),
         max_per_img=100))
-# optimizer = dict(type='SGD', lr=0.002, momentum=0.9, weight_decay=0.0001)
+optimizer = dict(type='SGD', lr=0.002, momentum=0.9, weight_decay=0.0001)
 find_unused_parameters=True
 # resume_from = '/data/data1/lxp/open-mmlab/mmdetection/work_dirs/crfsdet_r50_c1/latest.pth'
-optimizer = dict(type='SGD', lr=0.002, momentum=0.9, weight_decay=0.0001)
-optimizer_config = dict(grad_clip=None)
-# learning policy
-# lr_config = dict(
-#     policy='step',
-#     gamma=0.3,
-#     warmup='linear',
-#     warmup_iters=1000,
-#     warmup_ratio=0.001,
-#     step=[5, 9, 12, 14])
-# runner = dict(type='EpochBasedRunner', max_epochs=15)
-lr_config = dict(
-    policy='CosineAnnealing',
-    min_lr=0.0001,
-    by_epoch=False,
-    warmup='linear',
-    warmup_iters=1000,
-    warmup_ratio=0.001)
-#
-runner=dict(type='IterBasedRunner', max_iters=36000)
-# checkpoint_config = dict(interval=12)
-checkpoint_config = dict(interval=2400)
-
-evaluation=dict(interval=2400)

@@ -1,6 +1,6 @@
 _base_ = [
     './TSSD.py',
-    './_base_/default_runtime.py'
+    '../_base_/schedules/schedule_15e.py', '../_base_/default_runtime.py'
 ]
 INF = 1e8
 pretrained = 'https://github.com/SwinTransformer/storage/releases/download/v1.0.0/swin_tiny_patch4_window7_224.pth'  # noqa
@@ -47,6 +47,7 @@ model = dict(
         # regress_ranges=((-1, 64), (64, 128), (128, 256), (256, 512), (512, INF)),
         regress_ranges=((-1, 32),(32, 64), (64, INF)),
         # strides=[8, 16, 32, 64, 128],
+        bbox_norm_type='stride',
         strides=[4, 8, 16],
         center_sampling=False,
         dcn_on_last_conv=False,
@@ -81,30 +82,26 @@ model = dict(
         score_thr=0.05,
         nms=dict(type='nms', iou_threshold=0.6),
         max_per_img=100))
-# optimizer = dict(type='SGD', lr=0.002, momentum=0.9, weight_decay=0.0001)
+optimizer = dict(type='SGD', lr=0.002, momentum=0.9, weight_decay=0.0001)
 find_unused_parameters=True
 # resume_from = '/data/data1/lxp/open-mmlab/mmdetection/work_dirs/crfsdet_r50_c1/latest.pth'
-optimizer = dict(type='SGD', lr=0.002, momentum=0.9, weight_decay=0.0001)
-optimizer_config = dict(grad_clip=None)
-# learning policy
-# lr_config = dict(
-#     policy='step',
-#     gamma=0.3,
-#     warmup='linear',
-#     warmup_iters=1000,
-#     warmup_ratio=0.001,
-#     step=[5, 9, 12, 14])
-# runner = dict(type='EpochBasedRunner', max_epochs=15)
-lr_config = dict(
-    policy='CosineAnnealing',
-    min_lr=0.0001,
-    by_epoch=False,
-    warmup='linear',
-    warmup_iters=1000,
-    warmup_ratio=0.001)
-#
-runner=dict(type='IterBasedRunner', max_iters=36000)
-# checkpoint_config = dict(interval=12)
-checkpoint_config = dict(interval=2400)
-
-evaluation=dict(interval=2400)
+img_norm_cfg = dict(
+    mean=[46.173172, 46.173172, 46.173172], std=[40.773808, 40.773808, 40.773808], to_rgb=True)
+train_pipeline = [
+    dict(type='LoadImageFromFile'),
+    dict(type='LoadAnnotations', with_bbox=True),
+    dict(
+        type='Resize',
+        img_scale=[(576, 576), (448,448)],
+        multiscale_mode='range',
+        keep_ratio=True),
+    dict(type='FilterAnnotations', min_gt_bbox_wh=[4, 4]),
+    dict(type='RandomFlip', flip_ratio=0.5,direction=['horizontal', 'vertical', 'diagonal']),
+    dict(type='RandomShift', shift_ratio=0.5, max_shift_px=32),
+    dict(type='Normalize', **img_norm_cfg),
+    dict(type='Pad', size_divisor=32),
+    dict(type='DefaultFormatBundle'),
+    dict(type='Collect', keys=['img', 'gt_bboxes', 'gt_labels']),
+]
+data = dict(
+    train=dict(pipeline=train_pipeline))

@@ -1,6 +1,6 @@
 _base_ = [
     './TSSD.py',
-    './_base_/default_runtime.py'
+    '../_base_/default_runtime.py'
 ]
 INF = 1e8
 pretrained = 'https://github.com/SwinTransformer/storage/releases/download/v1.0.0/swin_tiny_patch4_window7_224.pth'  # noqa
@@ -44,6 +44,7 @@ model = dict(
         in_channels=256,
         stacked_convs=2,
         feat_channels=256,
+        bbox_norm_type='stride',
         # regress_ranges=((-1, 64), (64, 128), (128, 256), (256, 512), (512, INF)),
         regress_ranges=((-1, 32),(32, 64), (64, INF)),
         # strides=[8, 16, 32, 64, 128],

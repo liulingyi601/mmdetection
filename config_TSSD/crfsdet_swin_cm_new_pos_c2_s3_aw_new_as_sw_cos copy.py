@@ -1,6 +1,6 @@
 _base_ = [
     './TSSD.py',
-    './_base_/default_runtime.py'
+    '../_base_/default_runtime.py'
 ]
 INF = 1e8
 pretrained = 'https://github.com/SwinTransformer/storage/releases/download/v1.0.0/swin_tiny_patch4_window7_224.pth'  # noqa
