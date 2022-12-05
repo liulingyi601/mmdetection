@@ -3,12 +3,10 @@ from tkinter.messagebox import NO
 from turtle import forward
 import warnings
 
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from mmcv.cnn import ConvModule, Scale
-from mmcv.ops import DeformConv2d
 from mmcv.runner import force_fp32
 from mmcv.runner.base_module import Sequential
 from mmdet.core import (MlvlPointGenerator, bbox_overlaps, build_assigner,
@@ -51,20 +49,22 @@ def levels_to_images(mlvl_tensor):
 
 
 
-class cross_deformable_conv_new(nn.Module):
-    def __init__(self, strides, in_channles, num_samples, num_heads=1):
-        super(cross_deformable_conv_new, self).__init__()
+class cross_deformable_conv(nn.Module):
+    def __init__(self, strides, in_channles,cdf_conv):
+        super(cross_deformable_conv, self).__init__()
         self.strides=strides
-        self.num_samples = num_samples
+        self.num_samples = cdf_conv.num_samples
         self.num_levels = len(strides)
-        self.num_heads = num_heads
+        self.num_heads = cdf_conv.num_heads
         self.in_channles = in_channles
-        self.num_head_channles = int(in_channles / num_heads)
+        self.use_pos = cdf_conv.use_pos
+        self.num_head_channles = int(in_channles / self.num_heads)
         assert self.num_head_channles*self.num_heads == self.in_channles
         self.value_conv =  nn.Conv2d(in_channles, in_channles, 1)
-        self.offset_conv = nn.Conv2d(in_channles, num_heads * num_samples * self.num_levels *2, 3, padding=1)
-        self.weight_conv = nn.Conv2d(in_channles, num_heads * num_samples * self.num_levels, 3, padding=1)
-        # self.level_embeds = nn.Parameter(torch.Tensor(self.num_levels, self.feat_channels))
+        self.offset_conv = nn.Conv2d(in_channles, self.num_samples * self.num_heads * self.num_levels *2, 3, padding=1)
+        self.weight_conv = nn.Conv2d(in_channles, self.num_samples * self.num_heads * self.num_levels, 3, padding=1)
+        if self.use_pos:
+            self.level_embeds = nn.Parameter(torch.Tensor(self.num_levels, self.in_channles))
         self.norm_conv = nn.Conv2d(in_channles, in_channles, 1)
 
         self.norm_layer1 = nn.LayerNorm(in_channles)
@@ -74,66 +74,17 @@ class cross_deformable_conv_new(nn.Module):
                     nn.Linear(in_channles*2, in_channles))
         self.norm_layer2 = nn.LayerNorm(in_channles)
 
-    def forward(self, feats, all_level_feat_points):
+    def forward(self, feats, all_level_feat_points, positional_encodings=None):
         queries = []
         values=[]
-        for i, feat in enumerate(feats): 
-            values.append(self.value_conv(feat))
-            queries.append(feat)
-
-        out_feats = []
-        
-        for i, query in enumerate(queries):
-            N, _, H, W = query.size()
-            points = (all_level_feat_points[i] / self.strides[i]).view(H, W, 2)
-            offset = self.offset_conv(query)
-            sample_weight = F.softmax(self.weight_conv(query).view(N*self.num_heads,1,self.num_levels*self.num_samples, H, W), dim=2)
-            offset = offset.reshape(N*self.num_heads, self.num_levels, self.num_samples,2, H,W).permute(0,1,2,4,5,3).contiguous() #bs*num_heads, num_levels, num_samples, H_, W_, 2
-            offset[...,0] = (offset[...,0] + points[None,None, None, :, :, 0]) / W
-            offset[...,1] = (offset[...,1] + points[None,None, None, :, :, 1]) / H
-            sample_location = offset * 2 - 1
-            sample_feat = []
-            for j in range(self.num_levels):
-                sample_feat.append(F.grid_sample(values[j].view(N*self.num_heads,self.num_head_channles, values[j].shape[-2], values[j].shape[-1]), sample_location[:,j].flatten(2,3), mode='bilinear',padding_mode='zeros',align_corners=False))
-            sample_feats = (torch.cat(sample_feat, dim=2).view(N*self.num_heads,self.num_head_channles, self.num_levels*self.num_samples,H, W) * sample_weight).sum(2).view(N, -1, H, W)
-            out_feat = self.norm_conv(sample_feats) + feats[i]
-            out_feat = out_feat.permute(0,2,3,1).contiguous()
-            out_feat = self.norm_layer1(out_feat)
-            out_feat = self.FFN(out_feat) + out_feat
-            out_feat = self.norm_layer2(out_feat)
-            out_feats.append(out_feat.permute(0, 3, 1, 2).contiguous())
-        return out_feats
-
-
-class cross_deformable_conv_pos(nn.Module):
-    def __init__(self, strides, in_channles, num_samples, num_heads=1):
-        super(cross_deformable_conv_pos, self).__init__()
-        self.strides=strides
-        self.num_samples = num_samples
-        self.num_levels = len(strides)
-        self.num_heads = num_heads
-        self.in_channles = in_channles
-        self.num_head_channles = int(in_channles / num_heads)
-        assert self.num_head_channles*self.num_heads == self.in_channles
-        self.value_conv =  nn.Conv2d(in_channles, in_channles, 1)
-        self.offset_conv = nn.Conv2d(in_channles, num_heads * num_samples * self.num_levels *2, 3, padding=1)
-        self.weight_conv = nn.Conv2d(in_channles, num_heads * num_samples * self.num_levels, 3, padding=1)
-        self.level_embeds = nn.Parameter(torch.Tensor(self.num_levels, self.in_channles))
-        self.norm_conv = nn.Conv2d(in_channles, in_channles, 1)
-
-        self.norm_layer1 = nn.LayerNorm(in_channles)
-        self.FFN = nn.Sequential(
-                    nn.Linear(in_channles, in_channles*2), 
-                    nn.ReLU(inplace=True),
-                    nn.Linear(in_channles*2, in_channles))
-        self.norm_layer2 = nn.LayerNorm(in_channles)
-
-    def forward(self, feats, all_level_feat_points, positional_encodings):
-        queries = []
-        values=[]
-        for i, feat in enumerate(feats): 
-            values.append(self.value_conv(feat))
-            queries.append(feat+positional_encodings[i]+self.level_embeds[i][None,:,None,None])
+        if self.use_pos:
+            for i, feat in enumerate(feats): 
+                values.append(self.value_conv(feat))
+                queries.append(feat+positional_encodings[i]+self.level_embeds[i][None,:,None,None])
+        else:
+            for i, feat in enumerate(feats): 
+                values.append(self.value_conv(feat))
+                queries.append(feat)
 
         out_feats = []
         
@@ -160,18 +111,18 @@ class cross_deformable_conv_pos(nn.Module):
 
 
 @HEADS.register_module()
-class BGMSRefineHead(ATSSHead, FCOSHead):
+class BGMSRefineHead(FCOSHead):
     def __init__(self,
                  num_classes,
                  in_channels,
-                 num_heads=1,
+                 cdf_conv=dict(num_heads=1, num_samples=5, use_pos=False),
+                #  use_pos=False,
                  bbox_weight_cfg='pred',
                  use_refine_vfl=True,
                  sample_weight=False,
-                 use_uniform=False,
+                 num_samples=5,
                 #  cross_norm_cfg='ln',
                  auto_weighted_loss=False,
-                 use_pos=False,
                  weight_clamp=True,
                  regress_ranges=((-1, 64), (64, 128), (128, 256), (256, 512),
                                  (512, INF)),
@@ -219,14 +170,11 @@ class BGMSRefineHead(ATSSHead, FCOSHead):
         # dcn base offsets, adapted from reppoints_head.py
         self.weight_clamp=weight_clamp
         self.bbox_weight_cfg=bbox_weight_cfg
-        self.num_samples = 5
-        self.num_heads=num_heads
+        self.cdf_conv=cdf_conv
         self.auto_weighted_loss = auto_weighted_loss
         self.sample_weight=sample_weight
-        self.use_uniform=use_uniform
         self.use_refine_vfl=use_refine_vfl
-        # self.cross_norm_cfg = cross_norm_cfg
-        self.use_pos=use_pos
+        self.num_samples=num_samples
         super(FCOSHead, self).__init__(
             num_classes,
             in_channels,
@@ -261,7 +209,7 @@ class BGMSRefineHead(ATSSHead, FCOSHead):
         self.atss_prior_generator = build_prior_generator(anchor_generator)
         self.fcos_prior_generator = MlvlPointGenerator(anchor_generator['strides'], self.anchor_center_offset)
         self.prior_generator = self.fcos_prior_generator
-        if self.use_pos:
+        if self.cdf_conv.use_pos:
             positional_encoding=dict(
                 type='SinePositionalEncoding',
                 num_feats=self.feat_channels/2,
@@ -287,21 +235,10 @@ class BGMSRefineHead(ATSSHead, FCOSHead):
     def _init_layers(self):
         self.cls_layer = nn.ModuleList()
         self.reg_layer = nn.ModuleList()
-        # if self.cross_norm_cfg =='ln':
-        #     cross_conv = cross_deformable_conv
-        # elif self.cross_norm_cfg =='bn':
-        #     cross_conv = cross_deformable_conv_bn
-        # elif self.cross_norm_cfg =='no':
-        #     cross_conv = cross_deformable_conv_no
-        if self.use_pos:
-            cross_conv = cross_deformable_conv_pos
-        else:
-            cross_conv = cross_deformable_conv_new
-        # pdb.set_trace()
 
         for i in range(self.stacked_convs):
-            self.cls_layer.append(cross_conv(self.strides, self.feat_channels, num_samples=self.num_samples, num_heads=self.num_heads))
-            self.reg_layer.append(cross_conv(self.strides, self.feat_channels, num_samples=self.num_samples, num_heads=self.num_heads))
+            self.cls_layer.append(cross_deformable_conv(self.strides, self.feat_channels, self.cdf_conv))
+            self.reg_layer.append(cross_deformable_conv(self.strides, self.feat_channels, self.cdf_conv))
         
         self.relu = nn.ReLU(inplace=True)
         self.vfnet_reg_conv = ConvModule(
@@ -319,8 +256,6 @@ class BGMSRefineHead(ATSSHead, FCOSHead):
         self.scales = nn.ModuleList([Scale(1.0) for _ in self.strides])
         self.vfnet_reg_refine = nn.Conv2d(self.feat_channels, 4, 3, padding=1)
         self.scales_refine = nn.ModuleList([Scale(1.0) for _ in self.strides])
-        # self.level_embeds = nn.Parameter(
-        #     torch.Tensor(len(self.strides), self.feat_channels))
         self.vfnet_cls = nn.Conv2d(
             self.feat_channels, self.cls_out_channels, 3, padding=1)
         self.vfnet_reg_conv_weight = nn.Conv2d(self.feat_channels, self.num_samples * len(self.strides), 1)
@@ -350,29 +285,24 @@ class BGMSRefineHead(ATSSHead, FCOSHead):
         N = feats[0].size()[0]
         featmap_sizes = [feat.size()[-2:] for feat in feats]
         all_level_points = self.fcos_prior_generator.grid_priors(featmap_sizes, feats[0].dtype, feats[0].device)
-        if self.use_pos:
+        if self.cdf_conv.use_pos:
             positional_encodings = []
             for i, featmap_size in enumerate(featmap_sizes):
                 mask = feats[0].new_zeros((N, featmap_size[0], featmap_size[1])).to(torch.bool)
                 positional_encodings.append(self.positional_encoding(mask))
-        
-            for cls_layer in self.cls_layer:
-                cls_feats = cls_layer(feats, all_level_points, positional_encodings)
-            for reg_layer in self.reg_layer:
-                reg_feats = reg_layer(feats, all_level_points, positional_encodings)
         else:
-            for cls_layer in self.cls_layer:
-                cls_feats = cls_layer(feats, all_level_points)
-            for reg_layer in self.reg_layer:
-                reg_feats = reg_layer(feats, all_level_points)
+            positional_encodings=None
+
+
+        for cls_layer in self.cls_layer:
+            cls_feats = cls_layer(feats, all_level_points, positional_encodings)
+        for reg_layer in self.reg_layer:
+            reg_feats = reg_layer(feats, all_level_points, positional_encodings)
         cls_scores = []
         bbox_preds = []
-        # pdb.set_trace()
         bbox_pred_refines = []
         for i, reg_feat in enumerate(reg_feats):
             N, _, W, H = reg_feat.size()
-            # reg_feat_p = reg_feat + positional_encodings[i] 
-            # reg_feat_p = reg_feat
             reg_feat_init = self.vfnet_reg_conv(reg_feat)
             reg_feat_weight = F.softmax(self.vfnet_reg_conv_weight(reg_feat_init),dim=1)
             cls_feat_weight = F.softmax(self.vfnet_cls_conv_weight(reg_feat_init),dim=1)
@@ -505,9 +435,6 @@ class BGMSRefineHead(ATSSHead, FCOSHead):
         """
         assert len(cls_scores) == len(bbox_preds) == len(bbox_preds_refine)
         featmap_sizes = [featmap.size()[-2:] for featmap in cls_scores]
-
-        # pdb.set_trace()
-
         # list（n_levels * tensor[N,C,W,H]) >>> list(N*list(n_levels*tensor[W*H, C])) >>> list(N*tensor[n_anchor, C])
         bbox_preds_list = levels_to_images(bbox_preds)
         bbox_preds_refine_list = levels_to_images(bbox_preds_refine)
@@ -519,7 +446,6 @@ class BGMSRefineHead(ATSSHead, FCOSHead):
         # label_weights:list(N*tensor[n_anchors])
         # bbox_targets,pre_boxes,pre_boxes_refine:list(N*tensor(n_pos, 4))
         # bbox_weights, bbox_weights_refine:list(N*tensor(n_pos))
-
 
         flatten_cls_scores=torch.cat(cls_scores_list) # tensor(N*n_anchors, n_classes)
         flatten_labels = torch.cat(all_labels) # tensor(N*n_anchors, n_classes)
@@ -765,7 +691,7 @@ class BGMSRefineHead(ATSSHead, FCOSHead):
 
 
         num_level_anchors_inside = self.get_num_level_anchors_inside(num_level_anchors, inside_flags)
-        if self.use_uniform:
+        if self.train_cfg.assigner.type=='UniformAssigner':
             decoder_bbox_preds_refine = self.bbox_coder.decode(points, bbox_preds_refine)
             assign_result = self.assigner.assign(decoder_bbox_preds_refine, anchors, gt_bboxes, gt_bboxes_ignore, gt_labels)
         else:
