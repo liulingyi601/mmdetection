@@ -111,7 +111,11 @@ class UniformAssigner(BaseAssigner):
         pos_gt_index_with_ignore = pos_gt_index + 1
         pos_gt_index_with_ignore[pos_ignore_idx] = -1
         assigned_gt_inds[indexes] = pos_gt_index_with_ignore
-
+        # import numpy as np
+        # import pdb
+        # print(np.unique(pos_gt_index_with_ignore.cpu(), return_counts=True))
+        # print(pos_ious[~pos_ignore_idx])
+        # pdb.set_trace()
         if gt_labels is not None:
             assigned_labels = assigned_gt_inds.new_full((num_bboxes, ), -1)
             pos_inds = torch.nonzero(
