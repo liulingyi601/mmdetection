@@ -98,5 +98,5 @@ lr_config = dict(
 runner=dict(type='IterBasedRunner', max_iters=54000)
 # checkpoint_config = dict(interval=12)
 checkpoint_config = dict(interval=3000)
-
+auto_resume=True
 evaluation=dict(interval=3000)
