@@ -319,7 +319,7 @@ class BGMSRefineHead(FCOSHead):
             sample_location, cls_sample_location = self.gen_sample_location(bbox_pred, all_level_points[i], self.strides[i])
             sampling_reg_list = []
             sampling_cls_list = []
-            for j in range(len(self.strides)):
+            for j in range(self.num_stage):
                 # pdb.set_trace()
                 sampling_reg_list.append(F.grid_sample(reg_feats[j], sample_location, mode='bilinear',padding_mode='zeros',align_corners=False).view(N, -1, W, H, self.num_samples).permute(0,1,4,2,3).contiguous())
                 sampling_cls_list.append(F.grid_sample(cls_feats[j], cls_sample_location, mode='bilinear',padding_mode='zeros',align_corners=False).view(N, -1, W, H, self.num_samples).permute(0,1,4,2,3).contiguous())
