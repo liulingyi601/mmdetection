@@ -58,7 +58,8 @@ model = dict(
             ratios=[1.0],
             octave_base_scale=2,
             scales_per_octave=1,
-            center_offset=0.0,
+            center_offset=0.5,
+            centers=[(2.,2.),(4.,4.),(8.,8.)],
             # strides=[8, 16, 32, 64, 128]),
             strides=[4, 8, 16]),
         loss_cls=dict(
@@ -72,7 +73,7 @@ model = dict(
         loss_bbox_refine=dict(type='GIoULoss', loss_weight=2.0)),
     # training and testing settings
     train_cfg=dict(
-        assigner=dict(type='UniformAssigner', pos_ignore_thr=0.15, neg_ignore_thr=0.7),
+        assigner=dict(type='ATSSAssigner', topk=9),
         allowed_border=-1,
         pos_weight=-1,
         debug=False),
@@ -117,5 +118,5 @@ lr_config = dict(
 runner=dict(type='IterBasedRunner', max_iters=54000)
 # checkpoint_config = dict(interval=12)
 checkpoint_config = dict(interval=3000)
-auto_resume=True
+
 evaluation=dict(interval=3000)

@@ -69,9 +69,9 @@ class AnchorGenerator:
                  centers=None,
                  center_offset=0.):
         # check center and center_offset
-        if center_offset != 0:
-            assert centers is None, 'center cannot be set when center_offset' \
-                                    f'!=0, {centers} is given.'
+        # if center_offset != 0:
+        #     assert centers is None, 'center cannot be set when center_offset' \
+        #                             f'!=0, {centers} is given.'
         if not (0 <= center_offset <= 1):
             raise ValueError('center_offset should be in range [0, 1], '
                              f'{center_offset} is given.')
@@ -190,7 +190,8 @@ class AnchorGenerator:
             y_center + 0.5 * hs
         ]
         base_anchors = torch.stack(base_anchors, dim=-1)
-
+        # import pdb
+        # pdb.set_trace()
         return base_anchors
 
     def _meshgrid(self, x, y, row_major=True):

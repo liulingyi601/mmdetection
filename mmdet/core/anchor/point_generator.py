@@ -159,6 +159,8 @@ class MlvlPointGenerator:
                    self.offset) * stride_h
         # keep featmap_size as Tensor instead of int, so that we
         # can convert to ONNX correctly
+        # import pdb 
+        # pdb.set_trace()
         shift_y = shift_y.to(dtype)
         shift_xx, shift_yy = self._meshgrid(shift_x, shift_y)
         if not with_stride:
