@@ -200,7 +200,8 @@ class BGMSRefineHead(FCOSHead):
         self.loss_bbox_refine = build_loss(loss_bbox_refine)
         self.reg_decoded_bbox = reg_decoded_bbox
         self.use_sigmoid_cls = loss_cls.get('use_sigmoid', False)
-        self.anchor_center_offset = anchor_generator['center_offset']
+
+        self.anchor_center_offset = anchor_generator.get('center_offset', 0.0)
         self.num_base_priors = self.prior_generator.num_base_priors[0]
         self.sampling = False
         if self.train_cfg:
