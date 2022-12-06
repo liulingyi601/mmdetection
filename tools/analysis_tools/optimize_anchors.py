@@ -41,7 +41,7 @@ def parse_args():
         '--input-shape',
         type=int,
         nargs='+',
-        default=[608, 608],
+        default=[512, 512],
         help='input image size')
     parser.add_argument(
         '--algorithm',
@@ -285,6 +285,9 @@ class YOLODEAnchorOptimizer(BaseAnchorOptimizer):
         bounds = []
         for i in range(self.num_anchors):
             bounds.extend([(0, self.input_shape[0]), (0, self.input_shape[1])])
+        # bounds = []
+        # for i in range(self.num_anchors):
+        #     bounds.extend([(0, self.input_shape[0])])
 
         result = differential_evolution(
             func=self.avg_iou_cost,
@@ -301,6 +304,7 @@ class YOLODEAnchorOptimizer(BaseAnchorOptimizer):
         self.logger.info(
             f'Anchor evolution finish. Average IOU: {1 - result.fun}')
         anchors = [(w, h) for w, h in zip(result.x[::2], result.x[1::2])]
+        # anchors = [(w, w) for w in result.x]
         anchors = sorted(anchors, key=lambda x: x[0] * x[1])
         return anchors
 
@@ -311,6 +315,10 @@ class YOLODEAnchorOptimizer(BaseAnchorOptimizer):
             [[w, h]
              for w, h in zip(anchor_params[::2], anchor_params[1::2])]).to(
                  bboxes.device, dtype=bboxes.dtype)
+        # anchor_whs = torch.tensor(
+        #     [[w, w]
+        #      for w in anchor_params]).to(
+        #          bboxes.device, dtype=bboxes.dtype)
         anchor_boxes = bbox_cxcywh_to_xyxy(
             torch.cat([torch.zeros_like(anchor_whs), anchor_whs], dim=1))
         ious = bbox_overlaps(bboxes, anchor_boxes)

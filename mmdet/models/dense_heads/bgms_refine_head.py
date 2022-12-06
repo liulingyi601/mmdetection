@@ -126,6 +126,7 @@ class BGMSRefineHead(FCOSHead):
                  weight_clamp=True,
                  regress_ranges=((-1, 64), (64, 128), (128, 256), (256, 512),
                                  (512, INF)),
+                 reg_denoms=[32,64,128],
                  center_sampling=False,
                  center_sample_radius=1.5,
                  sync_num_pos=True,
@@ -182,9 +183,9 @@ class BGMSRefineHead(FCOSHead):
             init_cfg=init_cfg,
             **kwargs)
         self.regress_ranges = regress_ranges
-        self.reg_denoms = [regress_range[-1] for regress_range in regress_ranges]
+        self.reg_denoms = reg_denoms
         self.num_stage = len(self.strides)
-        self.reg_denoms[-1] = self.reg_denoms[-2] * 2
+        # self.reg_denoms[-1] = self.reg_denoms[-2] * 2
         self.center_sampling = center_sampling
         self.center_sample_radius = center_sample_radius
         self.sync_num_pos = sync_num_pos
