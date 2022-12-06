@@ -741,9 +741,9 @@ class YOLOAnchorGenerator(AnchorGenerator):
             of anchors in multiple levels.
     """
 
-    def __init__(self, strides, base_sizes):
+    def __init__(self, strides, base_sizes, center_offset=0.5):
         self.strides = [_pair(stride) for stride in strides]
-        self.centers = [(stride[0] / 2., stride[1] / 2.)
+        self.centers = [(stride[0] * center_offset, stride[1] * center_offset)
                         for stride in self.strides]
         self.base_sizes = []
         num_anchor_per_level = len(base_sizes[0])
@@ -800,7 +800,6 @@ class YOLOAnchorGenerator(AnchorGenerator):
             ])
             base_anchors.append(base_anchor)
         base_anchors = torch.stack(base_anchors, dim=0)
-
         return base_anchors
 
     def responsible_flags(self, featmap_sizes, gt_bboxes, device='cuda'):
