@@ -149,7 +149,7 @@ def main():
 
     if args.resume_from is not None:
         cfg.resume_from = args.resume_from
-    cfg.auto_resume = args.auto_resume
+    # cfg.auto_resume = args.auto_resume
     if args.gpus is not None:
         cfg.gpu_ids = range(1)
         warnings.warn('`--gpus` is deprecated because we only support '
