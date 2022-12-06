@@ -8,12 +8,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 from mmcv.cnn import ConvModule, Scale
 from mmcv.runner import force_fp32
-from mmcv.runner.base_module import Sequential
 from mmdet.core import (MlvlPointGenerator, bbox_overlaps, build_assigner,
                         build_prior_generator, build_sampler, multi_apply,anchor_inside_flags,unmap,images_to_levels,
                         reduce_mean)
 from ..builder import HEADS, build_loss
-from .atss_head import ATSSHead
 from .fcos_head import FCOSHead
 from mmcv.cnn.bricks.transformer import build_positional_encoding
 import pdb
