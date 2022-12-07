@@ -7,10 +7,8 @@ from ..builder import BBOX_ASSIGNERS
 from ..iou_calculators import build_iou_calculator
 from .assign_result import AssignResult
 from .base_assigner import BaseAssigner
-
-
 @BBOX_ASSIGNERS.register_module()
-class ATSSAssigner(BaseAssigner):
+class ATSSInsideAssigner(BaseAssigner):
     """Assign a corresponding gt bbox or background to each bbox.
 
     Each proposals will be assigned with `0` or a positive integer
@@ -29,13 +27,14 @@ class ATSSAssigner(BaseAssigner):
     def __init__(self,
                  topk,
                  alpha=None,
+                 inside=True,
                  iou_calculator=dict(type='BboxOverlaps2D'),
                  ignore_iof_thr=-1):
         self.topk = topk
         self.alpha = alpha
         self.iou_calculator = build_iou_calculator(iou_calculator)
         self.ignore_iof_thr = ignore_iof_thr
-
+        self.inside=inside
     """Assign a corresponding gt bbox or background to each bbox.
 
     Args:
@@ -179,17 +178,10 @@ class ATSSAssigner(BaseAssigner):
                 selectable_k, dim=0, largest=False)
             candidate_idxs.append(topk_idxs_per_level + start_idx)
             start_idx = end_idx
-        candidate_idxs = torch.cat(candidate_idxs, dim=0)
-
+        candidate_idxs= torch.cat(candidate_idxs, dim=0)
         # get corresponding iou for the these candidates, and compute the
         # mean and std, set mean + std as the iou threshold
         candidate_overlaps = overlaps[candidate_idxs, torch.arange(num_gt)]
-        overlaps_mean_per_gt = candidate_overlaps.mean(0)
-        overlaps_std_per_gt = candidate_overlaps.std(0)
-        overlaps_thr_per_gt = overlaps_mean_per_gt + overlaps_std_per_gt
-
-        is_pos = candidate_overlaps >= overlaps_thr_per_gt[None, :]
-
         # limit the positive sample's center in gt
         for gt_idx in range(num_gt):
             candidate_idxs[:, gt_idx] += gt_idx * num_bboxes
@@ -198,16 +190,23 @@ class ATSSAssigner(BaseAssigner):
         ep_bboxes_cy = bboxes_cy.view(1, -1).expand(
             num_gt, num_bboxes).contiguous().view(-1)
         candidate_idxs = candidate_idxs.view(-1)
-
         # calculate the left, top, right, bottom distance between positive
         # bbox center and gt side
-        l_ = ep_bboxes_cx[candidate_idxs].view(-1, num_gt) - gt_bboxes[:, 0]
-        t_ = ep_bboxes_cy[candidate_idxs].view(-1, num_gt) - gt_bboxes[:, 1]
-        r_ = gt_bboxes[:, 2] - ep_bboxes_cx[candidate_idxs].view(-1, num_gt)
-        b_ = gt_bboxes[:, 3] - ep_bboxes_cy[candidate_idxs].view(-1, num_gt)
-        is_in_gts = torch.stack([l_, t_, r_, b_], dim=1).min(dim=1)[0] > 0.01
+        # import pdb
+        # pdb.set_trace()
+        if self.inside:
+            l_ = ep_bboxes_cx[candidate_idxs].view(-1, num_gt) - gt_bboxes[:, 0]
+            t_ = ep_bboxes_cy[candidate_idxs].view(-1, num_gt) - gt_bboxes[:, 1]
+            r_ = gt_bboxes[:, 2] - ep_bboxes_cx[candidate_idxs].view(-1, num_gt)
+            b_ = gt_bboxes[:, 3] - ep_bboxes_cy[candidate_idxs].view(-1, num_gt)
+            is_in_gts = torch.stack([l_, t_, r_, b_], dim=1).min(dim=1)[0] > 0.01
 
-        is_pos = is_pos & is_in_gts
+            candidate_overlaps = candidate_overlaps*is_in_gts
+        overlaps_mean_per_gt = candidate_overlaps.mean(0)
+        overlaps_std_per_gt = candidate_overlaps.std(0)
+        inside_overlaps_thr_per_gt = overlaps_mean_per_gt + overlaps_std_per_gt
+
+        is_pos = candidate_overlaps >= inside_overlaps_thr_per_gt[None, :]
 
         # if an anchor box is assigned to multiple gts,
         # the one with the highest IoU will be selected.
