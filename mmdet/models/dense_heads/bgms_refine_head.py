@@ -506,7 +506,6 @@ class BGMSRefineHead(FCOSHead):
                 flatten_labels.detach(),
                 weight=flatten_label_weights.detach(),
                 avg_factor=num_pos_avg_per_gpu)
-        # pdb.set_trace()
         if self.auto_weighted_loss:
             loss_cls_aw = (-self.auto_loss_weights[0]).exp()*loss_cls + self.auto_loss_weights[0]
             loss_bbox_refine_aw = (-self.auto_loss_weights[1]).exp()*loss_bbox_refine + self.auto_loss_weights[1]
