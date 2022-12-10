@@ -83,7 +83,6 @@ class cross_deformable_conv(nn.Module):
             for i, feat in enumerate(feats): 
                 values.append(self.value_conv(feat))
                 queries.append(feat)
-
         out_feats = []
         
         for i, query in enumerate(queries):

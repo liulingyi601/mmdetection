@@ -40,6 +40,7 @@ model = dict(
         cdf_conv=dict(num_heads=1, num_samples=5, use_pos=True),
         auto_weighted_loss=True,
         sample_weight=True,
+        bbox_weight_cfg= 'anchor',
         num_classes=1,
         in_channels=256,
         stacked_convs=2,
