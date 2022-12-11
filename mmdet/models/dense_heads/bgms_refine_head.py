@@ -500,9 +500,12 @@ class BGMSRefineHead(FCOSHead):
                 flatten_labels.detach(),
                 avg_factor=num_pos_avg_per_gpu)
         else:
+            pos_id, pos_label=torch.where(flatten_labels>0)
+            flatten_targets = pos_label.new_full((flatten_labels.shape[0],),0)
+            flatten_targets[pos_id] = pos_label+1
             loss_cls = self.loss_cls(
                 flatten_cls_scores,
-                flatten_labels.detach(),
+                flatten_targets.detach(),
                 weight=flatten_label_weights.detach(),
                 avg_factor=num_pos_avg_per_gpu)
         if self.auto_weighted_loss:
