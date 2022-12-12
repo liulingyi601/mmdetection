@@ -20,7 +20,7 @@ def parse_args():
         '--shape',
         type=int,
         nargs='+',
-        default=[1280, 800],
+        default=[512, 512],
         help='input image size')
     parser.add_argument(
         '--cfg-options',

@@ -43,6 +43,7 @@ model = dict(
         num_classes=1,
         in_channels=256,
         stacked_convs=0,
+        post_stacked_convs=3,
         feat_channels=256,
         # regress_ranges=((-1, 64), (64, 128), (128, 256), (256, 512), (512, INF)),
         regress_ranges=((-1, 32),(32, 64), (64, INF)),
@@ -118,5 +119,5 @@ lr_config = dict(
 runner=dict(type='IterBasedRunner', max_iters=54000)
 # checkpoint_config = dict(interval=12)
 checkpoint_config = dict(interval=3000)
-
+auto_resume=True
 evaluation=dict(interval=3000)
