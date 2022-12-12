@@ -70,8 +70,8 @@ class cross_deformable_conv(nn.Module):
         self.num_head_channles = int(in_channles / self.num_heads)
         assert self.num_head_channles*self.num_heads == self.in_channles
         self.value_conv =  nn.Conv2d(in_channles, in_channles, 1)
-        self.offset_conv = nn.Conv2d(in_channles, self.num_samples * self.num_heads * self.num_levels *2, 3, padding=1)
-        self.weight_conv = nn.Conv2d(in_channles, self.num_samples * self.num_heads * self.num_levels, 3, padding=1)
+        self.offset_conv = nn.Conv2d(in_channles, self.num_samples * self.num_heads * self.num_levels *2, 1)
+        self.weight_conv = nn.Conv2d(in_channles, self.num_samples * self.num_heads * self.num_levels, 1)
         if self.use_pos:
             self.level_embeds = nn.Parameter(torch.Tensor(self.num_levels, self.in_channles))
         self.norm_conv = nn.Conv2d(in_channles, in_channles, 1)
@@ -124,12 +124,12 @@ class BGMSRefineHead(FCOSHead):
                  num_classes,
                  in_channels,
                  cdf_conv=dict(num_heads=1, num_samples=5, use_pos=False),
-                #  use_pos=False,
                  bbox_weight_cfg='pred',
                  use_refine_vfl=True,
                  sample_weight=False,
                  num_samples=5,
-                #  cross_norm_cfg='ln',
+                 stacked_convs=2,
+                 post_stacked_convs=0,
                  auto_weighted_loss=False,
                  weight_clamp=True,
                  regress_ranges=((-1, 64), (64, 128), (128, 256), (256, 512),
@@ -157,7 +157,6 @@ class BGMSRefineHead(FCOSHead):
                  loss_bbox=dict(type='GIoULoss', loss_weight=1.5),
                  loss_bbox_refine=dict(type='GIoULoss', loss_weight=2.0),
                  norm_cfg=dict(type='GN', num_groups=32, requires_grad=True),
-                #  use_atss=True,
                  reg_decoded_bbox=True,
                  anchor_generator=dict(
                      type='AnchorGenerator',
@@ -184,11 +183,14 @@ class BGMSRefineHead(FCOSHead):
         self.sample_weight=sample_weight
         self.use_refine_vfl=use_refine_vfl
         self.num_samples=num_samples
+        self.stacked_convs=stacked_convs
+        self.post_stacked_convs=post_stacked_convs
         super(FCOSHead, self).__init__(
             num_classes,
             in_channels,
             norm_cfg=norm_cfg,
             init_cfg=init_cfg,
+            stacked_convs=stacked_convs,
             **kwargs)
         self.regress_ranges = regress_ranges
         self.reg_denoms = reg_denoms
@@ -249,7 +251,7 @@ class BGMSRefineHead(FCOSHead):
         for i in range(self.stacked_convs):
             self.cls_layer.append(cross_deformable_conv(self.strides, self.feat_channels, self.cdf_conv))
             self.reg_layer.append(cross_deformable_conv(self.strides, self.feat_channels, self.cdf_conv))
-        for i in range(self.stacked_convs, 3):
+        for i in range(self.post_stacked_convs):
             if self.dcn_on_last_conv and i == self.stacked_convs - 1:
                 conv_cfg = dict(type='DCNv2')
             else:
@@ -266,7 +268,7 @@ class BGMSRefineHead(FCOSHead):
                     conv_cfg=conv_cfg,
                     norm_cfg=self.norm_cfg,
                     bias=self.conv_bias))
-        
+        # pdb.set_trace()
         self.relu = nn.ReLU(inplace=True)
         self.vfnet_reg_conv = ConvModule(
             self.feat_channels,
@@ -721,18 +723,13 @@ class BGMSRefineHead(FCOSHead):
 
 
         num_level_anchors_inside = self.get_num_level_anchors_inside(num_level_anchors, inside_flags)
-        if self.train_cfg.assigner.type=='UniformAssigner':
-            decoder_bbox_preds_refine = self.bbox_coder.decode(points, bbox_preds_refine)
-            assign_result = self.assigner.assign(decoder_bbox_preds_refine, anchors, gt_bboxes, gt_bboxes_ignore, gt_labels)
-        else:
-            assign_result = self.assigner.assign(anchors, num_level_anchors_inside, gt_bboxes, gt_bboxes_ignore, gt_labels)
+        assign_result = self.assigner.assign(anchors, num_level_anchors_inside, gt_bboxes, gt_bboxes_ignore, gt_labels)
         sampling_result = self.sampler.sample(assign_result, anchors, gt_bboxes)
         num_valid_anchors = anchors.shape[0]
         pos_inds = sampling_result.pos_inds
         neg_inds = sampling_result.neg_inds
         pos_gt_inds = sampling_result.pos_assigned_gt_inds
         num_pos = len(pos_inds)
-
         pos_bbox_targets = anchors.new_full((num_pos, 4), 0, dtype=torch.float)
         pos_pre_boxes = anchors.new_full((num_pos, 4), 0, dtype=torch.float)
         pos_pre_boxes_refine = anchors.new_full((num_pos, 4), 0, dtype=torch.float)
