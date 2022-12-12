@@ -51,7 +51,7 @@ class cross_conv(nn.Module):
         self.feat_channels=feat_channels
         self.conv = ConvModule(self.feat_channels, self.feat_channels, 3, stride=1, padding=1, conv_cfg=conv_cfg, norm_cfg=norm_cfg,bias=bias)
     def forward(self, cls_feats, all_level_points=None, positional_encodings=None):
-        pdb.set_trace()
+        # pdb.set_trace()
         out_feats = []
         for cls_feat in cls_feats:
             out_feats.append(self.conv(cls_feat))
