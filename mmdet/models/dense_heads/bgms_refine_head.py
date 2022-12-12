@@ -45,6 +45,17 @@ def levels_to_images(mlvl_tensor):
             batch_list[img].append(t[img])
     return [torch.cat(item, 0) for item in batch_list]
 
+class cross_conv(nn.Module):
+    def __init__(self, feat_channels, conv_cfg, norm_cfg, bias):
+        super(cross_conv, self).__init__()
+        self.feat_channels=feat_channels
+        self.conv = ConvModule(self.feat_channels, self.feat_channels, 3, stride=1, padding=1, conv_cfg=conv_cfg, norm_cfg=norm_cfg,bias=bias)
+    def forward(self, cls_feats, all_level_points=None, positional_encodings=None):
+        pdb.set_trace()
+        out_feats = []
+        for cls_feat in cls_feats:
+            out_feats.append(self.conv(cls_feat))
+        return out_feats
 
 
 class cross_deformable_conv(nn.Module):
@@ -238,6 +249,23 @@ class BGMSRefineHead(FCOSHead):
         for i in range(self.stacked_convs):
             self.cls_layer.append(cross_deformable_conv(self.strides, self.feat_channels, self.cdf_conv))
             self.reg_layer.append(cross_deformable_conv(self.strides, self.feat_channels, self.cdf_conv))
+        for i in range(self.stacked_convs, 3):
+            if self.dcn_on_last_conv and i == self.stacked_convs - 1:
+                conv_cfg = dict(type='DCNv2')
+            else:
+                conv_cfg = self.conv_cfg
+            self.cls_layer.append(
+                cross_conv(
+                    self.feat_channels,
+                    conv_cfg=conv_cfg,
+                    norm_cfg=self.norm_cfg,
+                    bias=self.conv_bias))
+            self.reg_layer.append(
+                cross_conv(
+                    self.feat_channels,
+                    conv_cfg=conv_cfg,
+                    norm_cfg=self.norm_cfg,
+                    bias=self.conv_bias))
         
         self.relu = nn.ReLU(inplace=True)
         self.vfnet_reg_conv = ConvModule(
@@ -292,11 +320,12 @@ class BGMSRefineHead(FCOSHead):
         else:
             positional_encodings=None
 
-
+        cls_feats = feats
+        reg_feats = feats
         for cls_layer in self.cls_layer:
-            cls_feats = cls_layer(feats, all_level_points, positional_encodings)
+            cls_feats = cls_layer(cls_feats, all_level_points, positional_encodings)
         for reg_layer in self.reg_layer:
-            reg_feats = reg_layer(feats, all_level_points, positional_encodings)
+            reg_feats = reg_layer(reg_feats, all_level_points, positional_encodings)
         cls_scores = []
         bbox_preds = []
         bbox_pred_refines = []
@@ -501,8 +530,8 @@ class BGMSRefineHead(FCOSHead):
                 avg_factor=num_pos_avg_per_gpu)
         else:
             pos_id, pos_label=torch.where(flatten_labels>0)
-            flatten_targets = pos_label.new_full((flatten_labels.shape[0],),0)
-            flatten_targets[pos_id] = pos_label+1
+            flatten_targets = pos_label.new_full((flatten_labels.shape[0],),self.num_classes)
+            flatten_targets[pos_id] = pos_label 
             loss_cls = self.loss_cls(
                 flatten_cls_scores,
                 flatten_targets.detach(),
