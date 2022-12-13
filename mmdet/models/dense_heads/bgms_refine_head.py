@@ -40,7 +40,7 @@ def levels_to_images(mlvl_tensor):
     channels = mlvl_tensor[0].size(1)
     for t in mlvl_tensor:
         t = t.permute(0, 2, 3, 1)
-        t = t.view(batch_size, -1, channels).contiguous()
+        t = t.view(batch_size, -1, channels)
         for img in range(batch_size):
             batch_list[img].append(t[img])
     return [torch.cat(item, 0) for item in batch_list]
@@ -67,11 +67,12 @@ class cross_deformable_conv(nn.Module):
         self.num_heads = cdf_conv.num_heads
         self.in_channles = in_channles
         self.use_pos = cdf_conv.use_pos
+        self.kernel_size=cdf_conv.kernel_size
         self.num_head_channles = int(in_channles / self.num_heads)
         assert self.num_head_channles*self.num_heads == self.in_channles
         self.value_conv =  nn.Conv2d(in_channles, in_channles, 1)
-        self.offset_conv = nn.Conv2d(in_channles, self.num_samples * self.num_heads * self.num_levels *2, 1)
-        self.weight_conv = nn.Conv2d(in_channles, self.num_samples * self.num_heads * self.num_levels, 1)
+        self.offset_conv = nn.Conv2d(in_channles, self.num_samples * self.num_heads * self.num_levels *2, self.kernel_size,padding=self.kernel_size//2)
+        self.weight_conv = nn.Conv2d(in_channles, self.num_samples * self.num_heads * self.num_levels, self.kernel_size, padding=self.kernel_size//2)
         if self.use_pos:
             self.level_embeds = nn.Parameter(torch.Tensor(self.num_levels, self.in_channles))
         self.norm_conv = nn.Conv2d(in_channles, in_channles, 1)
@@ -88,29 +89,42 @@ class cross_deformable_conv(nn.Module):
         values=[]
         if self.use_pos:
             for i, feat in enumerate(feats): 
-                values.append(self.value_conv(feat))
+                N, _, H, W = feat.size()
+                values.append(self.value_conv(feat).view(N*self.num_heads,self.num_head_channles, H, W))
                 queries.append(feat+positional_encodings[i]+self.level_embeds[i][None,:,None,None])
         else:
             for i, feat in enumerate(feats): 
-                values.append(self.value_conv(feat))
+                N, _, H, W = feat.size()
+                values.append(self.value_conv(feat).view(N*self.num_heads,self.num_head_channles, H, W))
                 queries.append(feat)
         out_feats = []
         
         for i, query in enumerate(queries):
             N, _, H, W = query.size()
-            points = (all_level_feat_points[i] / self.strides[i]).view(H, W, 2)
-            offset = self.offset_conv(query)
-            sample_weight = F.softmax(self.weight_conv(query).view(N*self.num_heads,1,self.num_levels*self.num_samples, H, W), dim=2)
-            offset = offset.reshape(N*self.num_heads, self.num_levels, self.num_samples,2, H,W).permute(0,1,2,4,5,3).contiguous() #bs*num_heads, num_levels, num_samples, H_, W_, 2
-            offset[...,0] = (offset[...,0] + points[None,None, None, :, :, 0]) / W
-            offset[...,1] = (offset[...,1] + points[None,None, None, :, :, 1]) / H
+            points = (all_level_feat_points[i] / self.strides[i])#H*W,2
+            offset = self.offset_conv(query)#B,nh*nl*ns*2,H,h
+            sample_weight = F.softmax(self.weight_conv(query).view(N*self.num_heads,self.num_levels*self.num_samples, H*W), dim=2)#B*nh,nl*ns,H*W
+            offset = offset.view(N*self.num_heads, self.num_levels*self.num_samples,2, H*W).permute(0,1,3,2) #b*nh,nl*ns,H*W,2
+            offset[...,0] = (offset[...,0] + points[None,None, :, 0]) / W
+            offset[...,1] = (offset[...,1] + points[None,None, :, 1]) / H
             sample_location = offset * 2 - 1
-            sample_feat = []
+            sample_feat = None
             for j in range(self.num_levels):
-                sample_feat.append(F.grid_sample(values[j].view(N*self.num_heads,self.num_head_channles, values[j].shape[-2], values[j].shape[-1]), sample_location[:,j].flatten(2,3), mode='bilinear',padding_mode='zeros',align_corners=False))
-            sample_feats = (torch.cat(sample_feat, dim=2).view(N*self.num_heads,self.num_head_channles, self.num_levels*self.num_samples,H, W) * sample_weight).sum(2).view(N, -1, H, W)
-            out_feat = self.norm_conv(sample_feats) + feats[i]
-            out_feat = out_feat.permute(0,2,3,1).contiguous()
+                # pdb.set_trace()
+                if sample_feat is None:
+                    sample_feat=(F.grid_sample(values[j], sample_location[:,j*self.num_samples:(j+1)*self.num_samples], mode='bilinear',padding_mode='zeros',align_corners=False) \
+                    *sample_weight[:,None, j*self.num_samples:(j+1)*self.num_samples]).sum(2)
+                else:
+                    sample_feat += (F.grid_sample(values[j], sample_location[:,j*self.num_samples:(j+1)*self.num_samples], mode='bilinear',padding_mode='zeros',align_corners=False) \
+                    *sample_weight[:,None, j*self.num_samples:(j+1)*self.num_samples]).sum(2)
+                # sample_feat.append(F.grid_sample(values[j], sample_location[:,j*self.num_samples:(j+1)*self.num_samples], mode='bilinear',padding_mode='zeros',align_corners=False) \
+                #     *sample_weight[:,None, j*self.num_samples:(j+1)*self.num_samples]) #b*nh,c/nh,ns,H*W
+                # sample_feat.append(F.grid_sample(values[j].view(N*self.num_heads,self.num_head_channles, values[j].shape[-2], values[j].shape[-1]), sample_location[:,j], mode='bilinear',padding_mode='zeros',align_corners=False))
+            # sample_feats = (torch.cat(sample_feat, dim=2)).sum(2).view(N, -1, H, W)
+            sample_feats = sample_feat.view(N, -1, H, W)
+
+            out_feat = self.norm_conv(sample_feats) + feats[i]#b,c,H,W
+            out_feat = out_feat.permute(0,2,3,1)
             out_feat = self.norm_layer1(out_feat)
             out_feat = self.FFN(out_feat) + out_feat
             out_feat = self.norm_layer2(out_feat)
@@ -123,7 +137,7 @@ class BGMSRefineHead(FCOSHead):
     def __init__(self,
                  num_classes,
                  in_channels,
-                 cdf_conv=dict(num_heads=1, num_samples=5, use_pos=False),
+                 cdf_conv=dict(num_heads=1, num_samples=5, use_pos=False, kernel_size=1),
                  bbox_weight_cfg='pred',
                  use_refine_vfl=True,
                  sample_weight=False,
@@ -338,33 +352,39 @@ class BGMSRefineHead(FCOSHead):
             cls_feat_weight = F.softmax(self.vfnet_cls_conv_weight(reg_feat_init),dim=1)
             if self.bbox_norm_type == 'reg_denom':
                 bbox_pred = self.scales[i](
-                    self.vfnet_reg(reg_feat_init)).float().exp() * self.reg_denoms[i]
+                    self.vfnet_reg(reg_feat_init)).exp() * self.reg_denoms[i]
             elif self.bbox_norm_type == 'stride':
                 bbox_pred = self.scales[i](
-                    self.vfnet_reg(reg_feat_init)).float().exp() * self.strides[i]
+                    self.vfnet_reg(reg_feat_init)).exp() * self.strides[i]
             else:
                 raise NotImplementedError
             # import pdb
             # pdb.set_trace()
-            sample_location, cls_sample_location = self.gen_sample_location(bbox_pred, all_level_points[i], self.strides[i])
-            sampling_reg_list = []
-            sampling_cls_list = []
+            reg_loc, cls_loc = self.gen_sample_location(bbox_pred, all_level_points[i], self.strides[i])
+            refine_reg_feat = None
+            refine_cls_feat= None
             for j in range(self.num_stage):
-                # pdb.set_trace()
-                sampling_reg_list.append(F.grid_sample(reg_feats[j], sample_location, mode='bilinear',padding_mode='zeros',align_corners=False).view(N, -1, W, H, self.num_samples).permute(0,1,4,2,3).contiguous())
-                sampling_cls_list.append(F.grid_sample(cls_feats[j], cls_sample_location, mode='bilinear',padding_mode='zeros',align_corners=False).view(N, -1, W, H, self.num_samples).permute(0,1,4,2,3).contiguous())
-            # import pdb
-            # pdb.set_trace()
-            refine_reg_feat = (torch.cat(sampling_reg_list, dim=2) * reg_feat_weight[:,None,:,:,:]).sum(2)
-            # cls_feat = (torch.cat(sampling_cls_list, dim=2) * reg_feat_weight[:,None,:,:,:]).sum(2)
-            refine_cls_feat = (torch.cat(sampling_cls_list, dim=2) * cls_feat_weight[:,None,:,:,:]).sum(2)
+                if refine_reg_feat is None:
+                    refine_reg_feat=(F.grid_sample(reg_feats[j], reg_loc.view(N, -1, H, 2), mode='bilinear',padding_mode='zeros',align_corners=False).view(N, -1, self.num_samples, W, H) * \
+                         reg_feat_weight[:,None, j*self.num_samples:(j+1)*self.num_samples]).sum(2)
+                    refine_cls_feat=(F.grid_sample(cls_feats[j], cls_loc.view(N, -1, H, 2), mode='bilinear',padding_mode='zeros',align_corners=False).view(N, -1, self.num_samples, W, H) * \
+                         cls_feat_weight[:,None, j*self.num_samples:(j+1)*self.num_samples]).sum(2)
+                else:
+                    refine_reg_feat+=(F.grid_sample(reg_feats[j], reg_loc.view(N, -1, H, 2), mode='bilinear',padding_mode='zeros',align_corners=False).view(N, -1, self.num_samples, W, H) * \
+                         reg_feat_weight[:,None, j*self.num_samples:(j+1)*self.num_samples]).sum(2)
+                    refine_cls_feat+=(F.grid_sample(cls_feats[j], cls_loc.view(N, -1, H, 2), mode='bilinear',padding_mode='zeros',align_corners=False).view(N, -1, self.num_samples, W, H) * \
+                         cls_feat_weight[:,None, j*self.num_samples:(j+1)*self.num_samples]).sum(2)
+            #     sampling_reg_list.append(F.grid_sample(reg_feats[j], reg_loc.view(N, -1, H, 2), mode='bilinear',padding_mode='zeros',align_corners=False).view(N, -1, self.num_samples, W, H) * reg_feat_weight[:,None, j*self.num_samples:(j+1)*self.num_samples])
+            #     sampling_cls_list.append(F.grid_sample(cls_feats[j], cls_loc.view(N, -1, H, 2), mode='bilinear',padding_mode='zeros',align_corners=False).view(N, -1, self.num_samples, W, H) * cls_feat_weight[:,None, j*self.num_samples:(j+1)*self.num_samples])
+
+            # refine_reg_feat = torch.cat(sampling_reg_list, dim=2).sum(2)
+            # refine_cls_feat = torch.cat(sampling_cls_list, dim=2).sum(2)
 
             # add a conv 
             refine_reg_feat = self.relu(self.reg_conv(refine_reg_feat))
             refine_cls_feat = self.relu(self.cls_conv(refine_cls_feat))
 
-            bbox_pred_refine = self.scales_refine[i](
-                self.vfnet_reg_refine(refine_reg_feat)).float().exp()
+            bbox_pred_refine = self.scales_refine[i](self.vfnet_reg_refine(refine_reg_feat)).exp()
             bbox_pred_refine = bbox_pred_refine * bbox_pred.detach()
             cls_score = self.vfnet_cls(refine_cls_feat)
             cls_scores.append(cls_score)
@@ -375,7 +395,7 @@ class BGMSRefineHead(FCOSHead):
         else:
             return cls_scores, bbox_pred_refines
 
-    def gen_sample_location(self, bbox_pred, points, stride):
+    def gen_sample_location_back(self, bbox_pred, points, stride):
         """Compute the sample location.
 
         Args:
@@ -412,8 +432,8 @@ class BGMSRefineHead(FCOSHead):
         cls_offset[:, :, :, 1, 1] = x2 / 2
         cls_offset[:, :, :, 3, 0] = y2 / 2
         cls_offset[:, :, :, 3, 1] = x2 / 2
-        cls_offset[:, :, :, 3, 0] = y2 / 2
-        cls_offset[:, :, :, 3, 1] = -1.0 * x1 / 2
+        cls_offset[:, :, :, 4, 0] = y2 / 2
+        cls_offset[:, :, :, 4, 1] = -1.0 * x1 / 2
 
         points = points.view(H,W,2)[None,:,:,None]
 
@@ -429,6 +449,52 @@ class BGMSRefineHead(FCOSHead):
 
 
         return sample_location, cls_sample_location
+    def gen_sample_location(self, bbox_pred, points, stride):
+        """Compute the sample location.
+
+        Args:
+            bbox_pred (Tensor): Predicted bbox distance offsets (l, r, t, b).
+            gradient_mul (float): Gradient multiplier.
+            stride (int): The corresponding stride for feature maps,
+                used to project the bbox onto the feature map.
+
+        Returns:
+            dcn_offsets (Tensor): The offsets for deformable convolution.
+        """
+        bbox_pred_grad_mul = (1 - self.gradient_mul) * bbox_pred.detach() + \
+            self.gradient_mul * bbox_pred
+        # map to the feature map scale
+        N, C, H, W = bbox_pred.size()
+        bbox_pred_grad_mul=bbox_pred_grad_mul.permute(0,2,3,1)
+        cls_loc = points.view(1,1,H,W,2).repeat(N,self.num_samples,1,1,1)
+        reg_loc = points.view(1,1,H,W,2).repeat(N,self.num_samples,1,1,1)
+
+        reg_loc[:,0, :,:, 0] -= bbox_pred_grad_mul[...,0]
+        reg_loc[:,1, :,:, 1] -= bbox_pred_grad_mul[...,1]
+        reg_loc[:,3, :,:, 1] += bbox_pred_grad_mul[...,3]
+        reg_loc[:,4, :,:, 0] += bbox_pred_grad_mul[...,2]
+
+        cls_loc[:,0, :,:, 0] -= bbox_pred_grad_mul[...,0]/2
+        cls_loc[:,0, :,:, 1] -= bbox_pred_grad_mul[...,1]/2   
+
+        cls_loc[:,1, :,:, 0] -= bbox_pred_grad_mul[...,0]/2
+        cls_loc[:,1, :,:, 1] += bbox_pred_grad_mul[...,3]/2   
+
+        cls_loc[:,3, :,:, 0] += bbox_pred_grad_mul[...,2]/2
+        cls_loc[:,3, :,:, 1] += bbox_pred_grad_mul[...,3]/2   
+
+        cls_loc[:,4, :,:, 0] += bbox_pred_grad_mul[...,2]/2
+        cls_loc[:,4, :,:, 1] -= bbox_pred_grad_mul[...,1]/2   
+        cls_loc[...,0] = cls_loc[...,0] / (W * stride)
+        cls_loc[...,1] = cls_loc[...,1] / (H * stride)
+
+        reg_loc[...,0] = reg_loc[...,0] / (W * stride)
+        reg_loc[...,1] = reg_loc[...,1] / (H * stride)
+        cls_loc = cls_loc * 2 - 1
+        reg_loc = reg_loc * 2 - 1
+
+
+        return reg_loc, cls_loc
 
     @force_fp32(apply_to=('cls_scores', 'bbox_preds', 'bbox_preds_refine'))
     def loss(self,
@@ -490,7 +556,7 @@ class BGMSRefineHead(FCOSHead):
         # sync num_pos across all gpus
         if self.sync_num_pos:
             num_pos_avg_per_gpu = reduce_mean(
-                flatten_labels.new_tensor(num_pos).float()).item()
+                flatten_cls_scores.new_tensor(num_pos)).item()
             num_pos_avg_per_gpu = max(num_pos_avg_per_gpu, 1.0)
         else:
             num_pos_avg_per_gpu = num_pos
