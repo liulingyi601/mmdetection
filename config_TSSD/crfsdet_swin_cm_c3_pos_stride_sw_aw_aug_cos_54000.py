@@ -37,7 +37,7 @@ model = dict(
         num_outs=3),
     bbox_head=dict(
         type='BGMSRefineHead',
-        cdf_conv=dict(num_heads=1, num_samples=5, use_pos=True),
+        cdf_conv=dict(num_heads=1, num_samples=5, use_pos=True, kernel_size=1),
         auto_weighted_loss=True,
         sample_weight=True,
         num_classes=1,
