@@ -101,29 +101,19 @@ class cross_deformable_conv(nn.Module):
         
         for i, query in enumerate(queries):
             N, _, H, W = query.size()
-            points = (all_level_feat_points[i] / self.strides[i])#H*W,2
-            offset = self.offset_conv(query)#B,nh*nl*ns*2,H,h
-            sample_weight = F.softmax(self.weight_conv(query).view(N*self.num_heads,self.num_levels*self.num_samples, H*W), dim=2)#B*nh,nl*ns,H*W
-            offset = offset.view(N*self.num_heads, self.num_levels*self.num_samples,2, H*W).permute(0,1,3,2) #b*nh,nl*ns,H*W,2
+            points = (all_level_feat_points[i] / self.strides[i])
+            offset = self.offset_conv(query).view(N*self.num_heads, self.num_levels*self.num_samples,2, H*W).permute(0,1,3,2) #b*nh,nl*ns,H*W,2
+            sample_weight = F.softmax(self.weight_conv(query).view(N*self.num_heads,self.num_levels*self.num_samples, H*W), dim=1)#B*nh,nl*ns,H*W
+            # pdb.set_trace()
             offset[...,0] = (offset[...,0] + points[None,None, :, 0]) / W
             offset[...,1] = (offset[...,1] + points[None,None, :, 1]) / H
-            sample_location = offset * 2 - 1
-            sample_feat = None
+            sample_location = offset * 2 - 1#b*nh,nl*ns,H*W,2
+            sample_feat = 0
             for j in range(self.num_levels):
-                # pdb.set_trace()
-                if sample_feat is None:
-                    sample_feat=(F.grid_sample(values[j], sample_location[:,j*self.num_samples:(j+1)*self.num_samples], mode='bilinear',padding_mode='zeros',align_corners=False) \
-                    *sample_weight[:,None, j*self.num_samples:(j+1)*self.num_samples]).sum(2)
-                else:
-                    sample_feat += (F.grid_sample(values[j], sample_location[:,j*self.num_samples:(j+1)*self.num_samples], mode='bilinear',padding_mode='zeros',align_corners=False) \
-                    *sample_weight[:,None, j*self.num_samples:(j+1)*self.num_samples]).sum(2)
-                # sample_feat.append(F.grid_sample(values[j], sample_location[:,j*self.num_samples:(j+1)*self.num_samples], mode='bilinear',padding_mode='zeros',align_corners=False) \
-                #     *sample_weight[:,None, j*self.num_samples:(j+1)*self.num_samples]) #b*nh,c/nh,ns,H*W
-                # sample_feat.append(F.grid_sample(values[j].view(N*self.num_heads,self.num_head_channles, values[j].shape[-2], values[j].shape[-1]), sample_location[:,j], mode='bilinear',padding_mode='zeros',align_corners=False))
-            # sample_feats = (torch.cat(sample_feat, dim=2)).sum(2).view(N, -1, H, W)
-            sample_feats = sample_feat.view(N, -1, H, W)
-
-            out_feat = self.norm_conv(sample_feats) + feats[i]#b,c,H,W
+                sample_feat += (F.grid_sample(values[j], sample_location[:,j*self.num_samples:(j+1)*self.num_samples], mode='bilinear',padding_mode='zeros',align_corners=False) \
+                *sample_weight[:,None, j*self.num_samples:(j+1)*self.num_samples]).sum(2) #b*nh, nhc, H*W
+            sample_feat = sample_feat.view(N, -1, H, W)
+            out_feat = self.norm_conv(sample_feat) + feats[i]#b,c,H,W
             out_feat = out_feat.permute(0,2,3,1)
             out_feat = self.norm_layer1(out_feat)
             out_feat = self.FFN(out_feat) + out_feat
@@ -350,6 +340,8 @@ class BGMSRefineHead(FCOSHead):
             reg_feat_init = self.vfnet_reg_conv(reg_feat)
             reg_feat_weight = F.softmax(self.vfnet_reg_conv_weight(reg_feat_init),dim=1)
             cls_feat_weight = F.softmax(self.vfnet_cls_conv_weight(reg_feat_init),dim=1)
+            # pdb.set_trace()
+
             if self.bbox_norm_type == 'reg_denom':
                 bbox_pred = self.scales[i](
                     self.vfnet_reg(reg_feat_init)).exp() * self.reg_denoms[i]
@@ -358,29 +350,16 @@ class BGMSRefineHead(FCOSHead):
                     self.vfnet_reg(reg_feat_init)).exp() * self.strides[i]
             else:
                 raise NotImplementedError
-            # import pdb
-            # pdb.set_trace()
             reg_loc, cls_loc = self.gen_sample_location(bbox_pred, all_level_points[i], self.strides[i])
-            refine_reg_feat = None
-            refine_cls_feat= None
+            refine_reg_feat = 0
+            refine_cls_feat= 0
+            # pdb.set_trace()
+
             for j in range(self.num_stage):
-                if refine_reg_feat is None:
-                    refine_reg_feat=(F.grid_sample(reg_feats[j], reg_loc.view(N, -1, H, 2), mode='bilinear',padding_mode='zeros',align_corners=False).view(N, -1, self.num_samples, W, H) * \
-                         reg_feat_weight[:,None, j*self.num_samples:(j+1)*self.num_samples]).sum(2)
-                    refine_cls_feat=(F.grid_sample(cls_feats[j], cls_loc.view(N, -1, H, 2), mode='bilinear',padding_mode='zeros',align_corners=False).view(N, -1, self.num_samples, W, H) * \
-                         cls_feat_weight[:,None, j*self.num_samples:(j+1)*self.num_samples]).sum(2)
-                else:
-                    refine_reg_feat+=(F.grid_sample(reg_feats[j], reg_loc.view(N, -1, H, 2), mode='bilinear',padding_mode='zeros',align_corners=False).view(N, -1, self.num_samples, W, H) * \
-                         reg_feat_weight[:,None, j*self.num_samples:(j+1)*self.num_samples]).sum(2)
-                    refine_cls_feat+=(F.grid_sample(cls_feats[j], cls_loc.view(N, -1, H, 2), mode='bilinear',padding_mode='zeros',align_corners=False).view(N, -1, self.num_samples, W, H) * \
-                         cls_feat_weight[:,None, j*self.num_samples:(j+1)*self.num_samples]).sum(2)
-            #     sampling_reg_list.append(F.grid_sample(reg_feats[j], reg_loc.view(N, -1, H, 2), mode='bilinear',padding_mode='zeros',align_corners=False).view(N, -1, self.num_samples, W, H) * reg_feat_weight[:,None, j*self.num_samples:(j+1)*self.num_samples])
-            #     sampling_cls_list.append(F.grid_sample(cls_feats[j], cls_loc.view(N, -1, H, 2), mode='bilinear',padding_mode='zeros',align_corners=False).view(N, -1, self.num_samples, W, H) * cls_feat_weight[:,None, j*self.num_samples:(j+1)*self.num_samples])
-
-            # refine_reg_feat = torch.cat(sampling_reg_list, dim=2).sum(2)
-            # refine_cls_feat = torch.cat(sampling_cls_list, dim=2).sum(2)
-
-            # add a conv 
+                refine_reg_feat+=(F.grid_sample(reg_feats[j], reg_loc.view(N, -1, H, 2), mode='bilinear',padding_mode='zeros',align_corners=False).view(N, -1, self.num_samples, W, H) * \
+                        reg_feat_weight[:,None, j*self.num_samples:(j+1)*self.num_samples]).sum(2)
+                refine_cls_feat+=(F.grid_sample(cls_feats[j], cls_loc.view(N, -1, H, 2), mode='bilinear',padding_mode='zeros',align_corners=False).view(N, -1, self.num_samples, W, H) * \
+                        cls_feat_weight[:,None, j*self.num_samples:(j+1)*self.num_samples]).sum(2)
             refine_reg_feat = self.relu(self.reg_conv(refine_reg_feat))
             refine_cls_feat = self.relu(self.cls_conv(refine_cls_feat))
 
@@ -390,65 +369,11 @@ class BGMSRefineHead(FCOSHead):
             cls_scores.append(cls_score)
             bbox_preds.append(bbox_pred)
             bbox_pred_refines.append(bbox_pred_refine)
+
         if self.training:
             return cls_scores, bbox_preds, bbox_pred_refines
         else:
             return cls_scores, bbox_pred_refines
-
-    def gen_sample_location_back(self, bbox_pred, points, stride):
-        """Compute the sample location.
-
-        Args:
-            bbox_pred (Tensor): Predicted bbox distance offsets (l, r, t, b).
-            gradient_mul (float): Gradient multiplier.
-            stride (int): The corresponding stride for feature maps,
-                used to project the bbox onto the feature map.
-
-        Returns:
-            dcn_offsets (Tensor): The offsets for deformable convolution.
-        """
-        bbox_pred_grad_mul = (1 - self.gradient_mul) * bbox_pred.detach() + \
-            self.gradient_mul * bbox_pred
-        # map to the feature map scale
-        N, C, H, W = bbox_pred.size()
-
-        x1 = bbox_pred_grad_mul[:, 0, :, :]
-        y1 = bbox_pred_grad_mul[:, 1, :, :]
-        x2 = bbox_pred_grad_mul[:, 2, :, :]
-        y2 = bbox_pred_grad_mul[:, 3, :, :]
-
-        sample_offset = bbox_pred.new_zeros(
-            N,  H, W, self.num_samples, 2)
-        sample_offset[:, :, :, 0, 0] = -1.0 * y1  # -y1
-        sample_offset[:, :, :, 1, 1] = -1.0 * x1
-        sample_offset[:, :, :, 3, 1] = x2  # -x1
-        sample_offset[:, :, :, 4, 0] = y2  # x2
-    
-        cls_offset = bbox_pred.new_zeros(
-            N,  H, W, self.num_samples, 2)
-        cls_offset[:, :, :, 0, 0] = -1.0 * y1 / 2
-        cls_offset[:, :, :, 0, 1] = -1.0 * x1 / 2
-        cls_offset[:, :, :, 1, 0] = -1.0 * y1 / 2
-        cls_offset[:, :, :, 1, 1] = x2 / 2
-        cls_offset[:, :, :, 3, 0] = y2 / 2
-        cls_offset[:, :, :, 3, 1] = x2 / 2
-        cls_offset[:, :, :, 4, 0] = y2 / 2
-        cls_offset[:, :, :, 4, 1] = -1.0 * x1 / 2
-
-        points = points.view(H,W,2)[None,:,:,None]
-
-        sample_location = sample_offset + points[:,:,:,:,:2]
-        sample_location[:,:,:,:,0] = sample_location[:,:,:,:,0] / (W * stride)
-        sample_location[:,:,:,:,1] = sample_location[:,:,:,:,1] / (H * stride)
-        sample_location = sample_location.view(N, W, H* self.num_samples, 2) * 2 - 1
-
-        cls_sample_location = cls_offset + points[:,:,:,:,:2]
-        cls_sample_location[:,:,:,:,0] = cls_sample_location[:,:,:,:,0] / (W * stride)
-        cls_sample_location[:,:,:,:,1] = cls_sample_location[:,:,:,:,1] / (W * stride)
-        cls_sample_location = cls_sample_location.view(N, W, H* self.num_samples, 2) * 2 - 1
-
-
-        return sample_location, cls_sample_location
     def gen_sample_location(self, bbox_pred, points, stride):
         """Compute the sample location.
 
@@ -468,7 +393,7 @@ class BGMSRefineHead(FCOSHead):
         bbox_pred_grad_mul=bbox_pred_grad_mul.permute(0,2,3,1)
         cls_loc = points.view(1,1,H,W,2).repeat(N,self.num_samples,1,1,1)
         reg_loc = points.view(1,1,H,W,2).repeat(N,self.num_samples,1,1,1)
-
+        # pdb.set_trace()
         reg_loc[:,0, :,:, 0] -= bbox_pred_grad_mul[...,0]
         reg_loc[:,1, :,:, 1] -= bbox_pred_grad_mul[...,1]
         reg_loc[:,3, :,:, 1] += bbox_pred_grad_mul[...,3]
