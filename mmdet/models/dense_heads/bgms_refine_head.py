@@ -105,12 +105,12 @@ class cross_deformable_conv(nn.Module):
             offset = self.offset_conv(query).view(N*self.num_heads, self.num_levels*self.num_samples,2, H*W).permute(0,1,3,2) #b*nh,nl*ns,H*W,2
             sample_weight = F.softmax(self.weight_conv(query).view(N*self.num_heads,self.num_levels*self.num_samples, H*W), dim=1)#B*nh,nl*ns,H*W
             # pdb.set_trace()
-            offset[...,0] = (offset[...,0] + points[None,None, :, 0]) / W
-            offset[...,1] = (offset[...,1] + points[None,None, :, 1]) / H
+            offset[...,0] = (offset[...,0] + points[None,None, :, 0]) / (W-1)
+            offset[...,1] = (offset[...,1] + points[None,None, :, 1]) / (H-1)
             sample_location = offset * 2 - 1#b*nh,nl*ns,H*W,2
             sample_feat = 0
             for j in range(self.num_levels):
-                sample_feat += (F.grid_sample(values[j], sample_location[:,j*self.num_samples:(j+1)*self.num_samples], mode='bilinear',padding_mode='zeros',align_corners=False) \
+                sample_feat += (F.grid_sample(values[j], sample_location[:,j*self.num_samples:(j+1)*self.num_samples], mode='bilinear',padding_mode='zeros',align_corners=True) \
                 *sample_weight[:,None, j*self.num_samples:(j+1)*self.num_samples]).sum(2) #b*nh, nhc, H*W
             sample_feat = sample_feat.view(N, -1, H, W)
             out_feat = self.norm_conv(sample_feat) + feats[i]#b,c,H,W
@@ -356,9 +356,9 @@ class BGMSRefineHead(FCOSHead):
             # pdb.set_trace()
 
             for j in range(self.num_stage):
-                refine_reg_feat+=(F.grid_sample(reg_feats[j], reg_loc.view(N, -1, H, 2), mode='bilinear',padding_mode='zeros',align_corners=False).view(N, -1, self.num_samples, W, H) * \
+                refine_reg_feat+=(F.grid_sample(reg_feats[j], reg_loc.view(N, -1, H, 2), mode='bilinear',padding_mode='zeros',align_corners=True).view(N, -1, self.num_samples, W, H) * \
                         reg_feat_weight[:,None, j*self.num_samples:(j+1)*self.num_samples]).sum(2)
-                refine_cls_feat+=(F.grid_sample(cls_feats[j], cls_loc.view(N, -1, H, 2), mode='bilinear',padding_mode='zeros',align_corners=False).view(N, -1, self.num_samples, W, H) * \
+                refine_cls_feat+=(F.grid_sample(cls_feats[j], cls_loc.view(N, -1, H, 2), mode='bilinear',padding_mode='zeros',align_corners=True).view(N, -1, self.num_samples, W, H) * \
                         cls_feat_weight[:,None, j*self.num_samples:(j+1)*self.num_samples]).sum(2)
             refine_reg_feat = self.relu(self.reg_conv(refine_reg_feat))
             refine_cls_feat = self.relu(self.cls_conv(refine_cls_feat))
@@ -410,11 +410,11 @@ class BGMSRefineHead(FCOSHead):
 
         cls_loc[:,4, :,:, 0] += bbox_pred_grad_mul[...,2]/2
         cls_loc[:,4, :,:, 1] -= bbox_pred_grad_mul[...,1]/2   
-        cls_loc[...,0] = cls_loc[...,0] / (W * stride)
-        cls_loc[...,1] = cls_loc[...,1] / (H * stride)
+        cls_loc[...,0] = cls_loc[...,0] / ((W-1) * stride)
+        cls_loc[...,1] = cls_loc[...,1] / ((H-1) * stride)
 
-        reg_loc[...,0] = reg_loc[...,0] / (W * stride)
-        reg_loc[...,1] = reg_loc[...,1] / (H * stride)
+        reg_loc[...,0] = reg_loc[...,0] / ((W-1) * stride)
+        reg_loc[...,1] = reg_loc[...,1] / ((H-1) * stride)
         cls_loc = cls_loc * 2 - 1
         reg_loc = reg_loc * 2 - 1
 
