@@ -132,13 +132,12 @@ def show_maps(maps, name):
     import matplotlib.pyplot as plt
     num_maps = len(maps)
     for i, map in enumerate(maps):
-        # pdb.set_trace()
         plt.subplot(1,num_maps, i+1)
         plt.imshow(map[0].sum(0).cpu())
     plt.savefig(name)
     plt.close()
 @HEADS.register_module()
-class BGMSRefineHead(FCOSHead):
+class BGMSCRefineHead(FCOSHead):
     def __init__(self,
                  num_classes,
                  in_channels,
@@ -237,7 +236,6 @@ class BGMSRefineHead(FCOSHead):
         self.loss_bbox_refine = build_loss(loss_bbox_refine)
         self.reg_decoded_bbox = reg_decoded_bbox
         self.use_sigmoid_cls = loss_cls.get('use_sigmoid', False)
-
         self.anchor_center_offset = anchor_generator.get('center_offset', 0.0)
         self.num_base_priors = self.prior_generator.num_base_priors[0]
         self.sampling = False
@@ -251,7 +249,6 @@ class BGMSRefineHead(FCOSHead):
         if self.cdf_conv.use_pos:
             positional_encoding=dict(type='SinePositionalEncoding', num_feats=self.feat_channels/2,normalize=True, offset=-0.5)
             self.positional_encoding = build_positional_encoding(positional_encoding)
-    
     @property
     def num_anchors(self):
         """
@@ -271,7 +268,6 @@ class BGMSRefineHead(FCOSHead):
     def _init_layers(self):
         self.cls_layer = ModuleList()
         self.reg_layer = ModuleList()
-
         for i in range(self.stacked_convs):
             self.cls_layer.append(cross_deformable_conv(self.strides, self.feat_channels, self.cdf_conv))
             self.reg_layer.append(cross_deformable_conv(self.strides, self.feat_channels, self.cdf_conv))
@@ -305,15 +301,15 @@ class BGMSRefineHead(FCOSHead):
             bias=self.conv_bias)
         self.vfnet_reg = nn.Conv2d(self.feat_channels, 4, 3, padding=1)
         self.scales = ModuleList([Scale(1.0) for _ in self.strides])
-        self.vfnet_reg_refine = nn.Conv2d(self.feat_channels, 4, 3, padding=1)
+        self.vfnet_reg_refine = nn.Conv2d(self.feat_channels, 4, 1)
         self.scales_refine = ModuleList([Scale(1.0) for _ in self.strides])
-        self.vfnet_cls = nn.Conv2d(self.feat_channels, self.cls_out_channels, 3, padding=1)
+        self.vfnet_cls = nn.Conv2d(self.feat_channels, self.cls_out_channels, 1)
 
         if self.use_cross_deformable_conv:
             self.vfnet_reg_conv_weight = nn.Conv2d(self.feat_channels, self.num_samples * len(self.strides), 1)
             self.vfnet_cls_conv_weight = nn.Conv2d(self.feat_channels, self.num_samples * len(self.strides), 1)
-            self.reg_conv = nn.Conv2d(self.feat_channels, self.feat_channels, 3, padding=1)
-            self.cls_conv = nn.Conv2d(self.feat_channels, self.feat_channels, 3, padding=1)
+            self.reg_conv = nn.Conv2d(self.feat_channels, self.feat_channels, 1)
+            self.cls_conv = nn.Conv2d(self.feat_channels, self.feat_channels, 1)
         else:
             self.vfnet_reg_refine_dconv=DeformConv2d(
             self.feat_channels,
@@ -328,7 +324,6 @@ class BGMSRefineHead(FCOSHead):
             1,
             padding=self.dcn_pad)
         if self.auto_weighted_loss:
-            # self.auto_loss_weights = nn.Parameter(torch.ones(3))
             self.auto_loss_weights = nn.Parameter(torch.zeros(3))
 
 
@@ -387,31 +382,24 @@ class BGMSRefineHead(FCOSHead):
                 bbox_pred = self.scales[i](self.vfnet_reg(reg_feat_init)).exp() * self.strides[i]
             else:
                 raise NotImplementedError
-            if self.use_cross_deformable_conv:
-                reg_feat_weight = F.softmax(self.vfnet_reg_conv_weight(reg_feat_init),dim=1)
-                cls_feat_weight = F.softmax(self.vfnet_cls_conv_weight(reg_feat_init),dim=1)
-                reg_loc, cls_loc = self.gen_sample_location(bbox_pred, all_level_points[i], self.strides[i])
-                reg_feat = 0
-                cls_feat= 0
-                for j in range(self.num_stage):
-                    reg_feat+=(F.grid_sample(reg_feats[j], reg_loc.view(N, -1, H, 2), mode='bilinear',padding_mode='zeros',align_corners=True).view(N, -1, self.num_samples, W, H) * \
-                            reg_feat_weight[:,None, j*self.num_samples:(j+1)*self.num_samples]).sum(2)
-                    cls_feat+=(F.grid_sample(cls_feats[j], cls_loc.view(N, -1, H, 2), mode='bilinear',padding_mode='zeros',align_corners=True).view(N, -1, self.num_samples, W, H) * \
-                            cls_feat_weight[:,None, j*self.num_samples:(j+1)*self.num_samples]).sum(2)
-                reg_feat = self.relu(self.reg_conv(reg_feat))
-                cls_feat = self.relu(self.cls_conv(cls_feat))
-                # refine_reg_feats.append(refine_reg_feat)
-                # refine_cls_feats.append(refine_cls_feat)
-                # bbox_pred_refine = self.scales_refine[i](self.vfnet_reg_refine(refine_reg_feat)).exp()
-                # bbox_pred_refine = bbox_pred_refine * bbox_pred.detach()
-                # cls_score = self.vfnet_cls(refine_cls_feat)
-                
-            else:
-                dcn_offset = self.star_dcn_offset(bbox_pred, self.gradient_mul, self.strides[i]).to(reg_feat.dtype)
-                reg_feat = self.relu(self.vfnet_reg_refine_dconv(reg_feat, dcn_offset))                
-                cls_feat = self.relu(self.vfnet_cls_dconv(cls_feats[i], dcn_offset))
+            reg_feat_weight = F.softmax(self.vfnet_reg_conv_weight(reg_feat_init),dim=1)
+            cls_feat_weight = F.softmax(self.vfnet_cls_conv_weight(reg_feat_init),dim=1)
+            reg_loc, cls_loc, d_loc, m_wh = self.gen_sample_location_c(bbox_pred, all_level_points[i], self.strides[i])
+            reg_feat = 0
+            cls_feat= 0
+            for j in range(self.num_stage):
+                reg_feat+=(F.grid_sample(reg_feats[j], reg_loc.view(N, -1, H, 2), mode='bilinear',padding_mode='zeros',align_corners=True).view(N, -1, self.num_samples, W, H) * \
+                        reg_feat_weight[:,None, j*self.num_samples:(j+1)*self.num_samples]).sum(2)
+                cls_feat+=(F.grid_sample(cls_feats[j], cls_loc.view(N, -1, H, 2), mode='bilinear',padding_mode='zeros',align_corners=True).view(N, -1, self.num_samples, W, H) * \
+                        cls_feat_weight[:,None, j*self.num_samples:(j+1)*self.num_samples]).sum(2)
+            reg_feat = self.relu(self.reg_conv(reg_feat))
+            cls_feat = self.relu(self.cls_conv(cls_feat))
             bbox_pred_refine = self.scales_refine[i](self.vfnet_reg_refine(reg_feat)).exp()
-            bbox_pred_refine = bbox_pred_refine * bbox_pred.detach()
+
+            bbox_pred_refine = bbox_pred_refine * m_wh.detach()
+            bbox_pred_refine[:,:2] -= d_loc.detach()
+            bbox_pred_refine[:,2:] += d_loc.detach()
+
             cls_score = self.vfnet_cls(cls_feat)
             cls_scores.append(cls_score)
             bbox_preds.append(bbox_pred)
@@ -423,7 +411,7 @@ class BGMSRefineHead(FCOSHead):
             return cls_scores, bbox_preds, bbox_pred_refines
         else:
             return cls_scores, bbox_pred_refines
-    def gen_sample_location(self, bbox_pred, points, stride):
+    def gen_sample_location_c(self, bbox_pred, points, stride):
         """Compute the sample location.
 
         Args:
@@ -439,36 +427,39 @@ class BGMSRefineHead(FCOSHead):
             self.gradient_mul * bbox_pred
         # map to the feature map scale
         N, C, H, W = bbox_pred.size()
-        bbox_pred_grad_mul=bbox_pred_grad_mul.permute(0,2,3,1)
+        # bbox_pred_grad_mul=bbox_pred_grad_mul.permute(0,2,3,1)
         cls_loc = points.view(1,1,H,W,2).repeat(N,self.num_samples,1,1,1)
         reg_loc = points.view(1,1,H,W,2).repeat(N,self.num_samples,1,1,1)
         # pdb.set_trace()
-        reg_loc[:,0, :,:, 0] -= bbox_pred_grad_mul[...,0]
-        reg_loc[:,1, :,:, 1] -= bbox_pred_grad_mul[...,1]
-        reg_loc[:,3, :,:, 1] += bbox_pred_grad_mul[...,3]
-        reg_loc[:,4, :,:, 0] += bbox_pred_grad_mul[...,2]
-
-        cls_loc[:,0, :,:, 0] -= bbox_pred_grad_mul[...,0]/2
-        cls_loc[:,0, :,:, 1] -= bbox_pred_grad_mul[...,1]/2   
-
-        cls_loc[:,1, :,:, 0] -= bbox_pred_grad_mul[...,0]/2
-        cls_loc[:,1, :,:, 1] += bbox_pred_grad_mul[...,3]/2   
-
-        cls_loc[:,3, :,:, 0] += bbox_pred_grad_mul[...,2]/2
-        cls_loc[:,3, :,:, 1] += bbox_pred_grad_mul[...,3]/2   
-
-        cls_loc[:,4, :,:, 0] += bbox_pred_grad_mul[...,2]/2
-        cls_loc[:,4, :,:, 1] -= bbox_pred_grad_mul[...,1]/2   
+        d_loc = (bbox_pred_grad_mul[:,2:]- bbox_pred_grad_mul[:,:2])/2
+        m_wh = ((bbox_pred_grad_mul[:,2:] + bbox_pred_grad_mul[:,:2])/2).repeat(1,2,1,1)
+        if self.num_samples==5:
+            reg_loc[:,0, :,:, 0] -= bbox_pred_grad_mul[:,0]
+            reg_loc[:,1, :,:, 1] -= bbox_pred_grad_mul[:,1]
+            reg_loc[:,3, :,:, 1] += bbox_pred_grad_mul[:,3]
+            reg_loc[:,4, :,:, 0] += bbox_pred_grad_mul[:,2]
+            reg_loc[:,[0,2,4],:,:,1] += d_loc[:,[1]]
+            reg_loc[:,[1,2,3],:,:,0] += d_loc[:,[0]]
+            cls_loc[:,0] = (reg_loc[:,0] + reg_loc[:,1])/2
+            cls_loc[:,1] = (reg_loc[:,1] + reg_loc[:,3])/2
+            cls_loc[:,2] = reg_loc[:,2]
+            cls_loc[:,3] = (reg_loc[:,3] + reg_loc[:,4])/2
+            cls_loc[:,4] = (reg_loc[:,4] + reg_loc[:,0])/2
+        if self.num_samples==9:
+            reg_loc[:,[0,1,2], :,:, 0] -= bbox_pred_grad_mul[:,[0]]
+            reg_loc[:,[3,4,5], :,:, 0] += d_loc[:,[0]]
+            reg_loc[:,[6,7,8], :,:, 0] += bbox_pred_grad_mul[:,[2]]
+            reg_loc[:,[0,3,6], :,:, 1] -= bbox_pred_grad_mul[:,[1]]
+            reg_loc[:,[1,4,7], :,:, 1] += d_loc[:,[1]]
+            reg_loc[:,[2,5,8], :,:, 1] += bbox_pred_grad_mul[:,[3]]
+            cls_loc=reg_loc/2
         cls_loc[...,0] = cls_loc[...,0] / ((W-1) * stride)
         cls_loc[...,1] = cls_loc[...,1] / ((H-1) * stride)
-
         reg_loc[...,0] = reg_loc[...,0] / ((W-1) * stride)
         reg_loc[...,1] = reg_loc[...,1] / ((H-1) * stride)
         cls_loc = cls_loc * 2 - 1
         reg_loc = reg_loc * 2 - 1
-
-
-        return reg_loc, cls_loc
+        return reg_loc, cls_loc, d_loc, m_wh
 
     def star_dcn_offset(self, bbox_pred, gradient_mul, stride):
         """Compute the star deformable conv offsets.
@@ -493,8 +484,7 @@ class BGMSRefineHead(FCOSHead):
         y1 = bbox_pred_grad_mul[:, 1, :, :]
         x2 = bbox_pred_grad_mul[:, 2, :, :]
         y2 = bbox_pred_grad_mul[:, 3, :, :]
-        bbox_pred_grad_mul_offset = bbox_pred.new_zeros(
-            N, 2 * self.num_dconv_points, H, W)
+        bbox_pred_grad_mul_offset = bbox_pred.new_zeros(N, 2 * self.num_dconv_points, H, W)
         bbox_pred_grad_mul_offset[:, 0, :, :] = -1.0 * y1  # -y1
         bbox_pred_grad_mul_offset[:, 1, :, :] = -1.0 * x1  # -x1
         bbox_pred_grad_mul_offset[:, 2, :, :] = -1.0 * y1  # -y1
@@ -508,7 +498,6 @@ class BGMSRefineHead(FCOSHead):
         bbox_pred_grad_mul_offset[:, 16, :, :] = y2  # y2
         bbox_pred_grad_mul_offset[:, 17, :, :] = x2  # x2
         dcn_offset = bbox_pred_grad_mul_offset - dcn_base_offset
-
         return dcn_offset
 
     @force_fp32(apply_to=('cls_scores', 'bbox_preds', 'bbox_preds_refine'))
@@ -550,18 +539,15 @@ class BGMSRefineHead(FCOSHead):
         bbox_preds_list = levels_to_images(bbox_preds)
         bbox_preds_refine_list = levels_to_images(bbox_preds_refine)
         cls_scores_list = levels_to_images(cls_scores)
-
         all_labels, all_label_weights, pos_bbox_targets, pos_pre_boxes, pos_pre_boxes_refine, pos_bbox_weights, pos_bbox_weights_refine = self.get_targets(
             bbox_preds_list, bbox_preds_refine_list, featmap_sizes, gt_bboxes, gt_labels, img_metas, gt_bboxes_ignore)
         # labels:list(N*tensor[n_anchors, n_classes])
         # label_weights:list(N*tensor[n_anchors])
         # bbox_targets,pre_boxes,pre_boxes_refine:list(N*tensor(n_pos, 4))
         # bbox_weights, bbox_weights_refine:list(N*tensor(n_pos))
-
         flatten_cls_scores=torch.cat(cls_scores_list) # tensor(N*n_anchors, n_classes)
         flatten_labels = torch.cat(all_labels) # tensor(N*n_anchors, n_classes)
         flatten_label_weights=torch.cat(all_label_weights) # tensor(N*n_anchors)
-
         flatten_bbox_targets=torch.cat(pos_bbox_targets)# tensor(n_pos, 4)
         flatten_pre_boxes=torch.cat(pos_pre_boxes) # tensor(n_pos, 4)
         flatten_pre_boxes_refine=torch.cat(pos_pre_boxes_refine) # tensor(n_pos, 4)
@@ -581,10 +567,6 @@ class BGMSRefineHead(FCOSHead):
         else:
             bbox_avg_factor_ini = reduce_mean(flatten_bbox_weights.sum()).item()
             bbox_avg_factor_rf = reduce_mean(flatten_bbox_weights_refine.sum()).item()
-        # pdb.set_trace()
-        # pos_decoded_bbox_preds, pos_decoded_target_preds, pos_decoded_bbox_preds_refine: tensor[n_pos, 4]
-        # bbox_weights_ini, bbox_weights_rf: tensor[n_pos]
-        # flatten_cls_scores, flatten_labels: tensor[N*n_anchors, n_classes]
         if num_pos > 0:
             loss_bbox = self.loss_bbox(
                 flatten_pre_boxes,
@@ -600,8 +582,7 @@ class BGMSRefineHead(FCOSHead):
         else:
             loss_bbox = flatten_pre_boxes.sum() * 0
             loss_bbox_refine = flatten_pre_boxes_refine.sum() * 0
-
-
+        # pdb.set_trace()
         if self.use_vfl:
             loss_cls = self.loss_cls(
                 flatten_cls_scores,
@@ -644,21 +625,16 @@ class BGMSRefineHead(FCOSHead):
                 valid_flag_list (list[Tensor]): Valid flags of each image.
         """
         num_imgs = len(img_metas)
-
-        # since feature map sizes of all images are the same, we only compute
-        # anchors for one time
         multi_level_anchors = self.atss_prior_generator.grid_priors(
             featmap_sizes, device=device)
         anchor_list = [multi_level_anchors for _ in range(num_imgs)]
-
-        # for each image, we compute valid flags of multi level anchors
         valid_flag_list = []
         for img_id, img_meta in enumerate(img_metas):
             multi_level_flags = self.atss_prior_generator.valid_flags(
                 featmap_sizes, img_meta['pad_shape'], device=device)
             valid_flag_list.append(multi_level_flags)
-
         return anchor_list, valid_flag_list
+
     def get_targets(self,
                     bbox_preds_list, 
                     bbox_preds_refine_list,
@@ -693,12 +669,10 @@ class BGMSRefineHead(FCOSHead):
         """
         assert len(featmap_sizes) == self.atss_prior_generator.num_levels == self.fcos_prior_generator.num_levels
         num_imgs = len(img_metas)
-
         device = bbox_preds_list[0].device
         all_level_points = self.fcos_prior_generator.grid_priors(
             featmap_sizes, bbox_preds_list[0].dtype, device)
         points_list = [torch.cat(all_level_points)]*num_imgs
-
         anchor_list, valid_flag_list = self.get_anchors(featmap_sizes, img_metas, device=device)
         assert len(anchor_list) == len(valid_flag_list) == num_imgs
         num_level_anchors = [anchors.size(0) for anchors in anchor_list[0]]
@@ -726,12 +700,6 @@ class BGMSRefineHead(FCOSHead):
              img_metas)
         if any([labels is None for labels in all_labels]):
             return None
-
-        # labels:list(N*tensor[n_anchors, n_classes])
-        # label_weights:list(N*tensor[n_anchors])
-        # bbox_targets,pre_boxes,pre_boxes_refine:list(N*tensor(n_pos, 4))
-        # bbox_weights, bbox_weights_refine:list(N*tensor(n_pos))
-
         return all_labels, all_label_weights, pos_bbox_targets, pos_pre_boxes, pos_pre_boxes_refine, pos_bbox_weights, pos_bbox_weights_refine
 
     def _get_target_single(self,
@@ -787,15 +755,10 @@ class BGMSRefineHead(FCOSHead):
                                            self.train_cfg.allowed_border)
         if not inside_flags.any():
             return (None, ) * 7
-        # assign gt and sample anchors
         anchors = flat_anchors[inside_flags, :]
         bbox_preds = flat_bbox_preds[inside_flags,:]
         bbox_preds_refine = flat_bbox_preds_refine[inside_flags,:]
         points = flat_points[inside_flags,:]
-
-
-
-
         num_level_anchors_inside = self.get_num_level_anchors_inside(num_level_anchors, inside_flags)
         assign_result = self.assigner.assign(anchors, num_level_anchors_inside, gt_bboxes, gt_bboxes_ignore, gt_labels)
         sampling_result = self.sampler.sample(assign_result, anchors, gt_bboxes)
@@ -809,18 +772,12 @@ class BGMSRefineHead(FCOSHead):
         pos_pre_boxes_refine = anchors.new_full((num_pos, 4), 0, dtype=torch.float)
         pos_bbox_weights = anchors.new_full((num_pos, ), 0, dtype=torch.float)
         pos_bbox_weights_refine = anchors.new_full((num_pos, ), 0, dtype=torch.float)
-
         all_labels = anchors.new_full((num_valid_anchors, self.num_classes), 0, dtype=torch.float)
         all_label_weights = anchors.new_zeros(num_valid_anchors, dtype=torch.float)
-
-
-
-        # pdb.set_trace()
         if num_pos > 0:
             pos_bbox_targets[:, :] = sampling_result.pos_gt_bboxes
             pos_pre_boxes[:,:] = self.bbox_coder.decode(points[pos_inds], bbox_preds[pos_inds])
             pos_pre_boxes_refine[:,:] = self.bbox_coder.decode(points[pos_inds], bbox_preds_refine[pos_inds])
-
             for i in range(sampling_result.num_gts):
                 sample_pos_ids = pos_gt_inds==i
                 sample_inds = pos_inds[sample_pos_ids]
@@ -839,11 +796,9 @@ class BGMSRefineHead(FCOSHead):
                 if self.sample_weight==True:
                     avg_factor = sample_weights.sum()
                     avg_factor_refine = sample_weights_refine.sum()
-
                 else:
                     avg_factor=1
                     avg_factor_refine=1
-                pdb.set_trace()
                 pos_bbox_weights[sample_pos_ids] = sample_weights / avg_factor
                 pos_bbox_weights_refine[sample_pos_ids] = sample_weights_refine /avg_factor_refine
                 if self.use_vfl:
@@ -851,26 +806,18 @@ class BGMSRefineHead(FCOSHead):
                         all_labels[sample_inds,gt_labels[i]]=sample_weights_refine
                     else:
                         all_labels[sample_inds,gt_labels[i]]=sample_weights
-
                 else:
                     all_labels[sample_inds,gt_labels[i]]=1
-
             if self.train_cfg.pos_weight <= 0:
                 all_label_weights[pos_inds] = 1.0
             else:
                 all_label_weights[pos_inds] = self.train_cfg.pos_weight
         if len(neg_inds) > 0:
             all_label_weights[neg_inds] = 1.0
-        # pdb.set_trace()
-        # map up to original set of anchors
         if unmap_outputs:
             num_total_anchors = flat_anchors.size(0)
             all_labels = unmap(all_labels, num_total_anchors, inside_flags)
             all_label_weights = unmap(all_label_weights, num_total_anchors, inside_flags)
-        # labels:tensor[n_anchors, n_classes]
-        # label_weights:tensor[n_anchors]
-        # bbox_targets,pre_boxes,pre_boxes_refine:tensor(n_pos, 4)
-        # bbox_weights, bbox_weights_refine:tensor(n_pos)
         return (all_labels, all_label_weights, pos_bbox_targets, pos_pre_boxes,pos_pre_boxes_refine, pos_bbox_weights,pos_bbox_weights_refine)
 
     def transform_bbox_targets(self, decoded_bboxes, mlvl_points, num_imgs):
@@ -896,7 +843,6 @@ class BGMSRefineHead(FCOSHead):
             bbox_target = self.bbox_coder.encode(mlvl_points[i],
                                                  decoded_bboxes[i])
             bbox_targets.append(bbox_target)
-
         return bbox_targets
     def get_num_level_anchors_inside(self, num_level_anchors, inside_flags):
         split_inside_flags = torch.split(inside_flags, num_level_anchors)
@@ -904,12 +850,11 @@ class BGMSRefineHead(FCOSHead):
             int(flags.sum()) for flags in split_inside_flags
         ]
         return num_level_anchors_inside
-    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
-                              missing_keys, unexpected_keys, error_msgs):
+    
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs):
         """Override the method in the parent class to avoid changing para's
         name."""
         pass
-
     def _get_points_single(self,
                            featmap_size,
                            stride,
@@ -917,16 +862,13 @@ class BGMSRefineHead(FCOSHead):
                            device,
                            flatten=False):
         """Get points according to feature map size.
-
         This function will be deprecated soon.
         """
-
         warnings.warn(
             '`_get_points_single` in `VFNetHead` will be '
             'deprecated soon, we support a multi level point generator now'
             'you can get points of a single level feature map'
             'with `self.fcos_prior_generator.single_level_grid_priors` ')
-
         h, w = featmap_size
         x_range = torch.arange(
             0, w * stride, stride, dtype=dtype, device=device)

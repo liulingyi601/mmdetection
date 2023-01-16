@@ -42,8 +42,8 @@ model = dict(
         sample_weight=True,
         num_classes=1,
         in_channels=256,
-        stacked_convs=2,
-        post_stacked_convs=1,
+        stacked_convs=0,
+        post_stacked_convs=3,
         feat_channels=256,
         # regress_ranges=((-1, 64), (64, 128), (128, 256), (256, 512), (512, INF)),
         regress_ranges=((-1, 32),(32, 64), (64, INF)),
@@ -106,7 +106,7 @@ train_pipeline = [
 ]
 data = dict(
     train=dict(pipeline=train_pipeline))
-optimizer = dict(type='SGD', lr=0.002, momentum=0.9, weight_decay=0.0001)
+optimizer = dict(type='SGD', lr=0.005, momentum=0.9, weight_decay=0.0001)
 optimizer_config = dict(grad_clip=None)
 lr_config = dict(
     policy='CosineAnnealing',
@@ -116,7 +116,7 @@ lr_config = dict(
     warmup_iters=1000,
     warmup_ratio=0.001)
 #
-runner=dict(type='IterBasedRunner', max_iters=54000)
+runner=dict(type='IterBasedRunner', max_iters=72000)
 # checkpoint_config = dict(interval=12)
 checkpoint_config = dict(interval=3000)
 auto_resume=True
