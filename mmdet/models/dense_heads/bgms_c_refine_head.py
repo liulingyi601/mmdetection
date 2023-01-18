@@ -441,10 +441,10 @@ class BGMSCRefineHead(FCOSHead):
             reg_loc[:,[0,2,4],:,:,1] += d_loc[:,[1]]
             reg_loc[:,[1,2,3],:,:,0] += d_loc[:,[0]]
             cls_loc[:,0] = (reg_loc[:,0] + reg_loc[:,1])/2
-            cls_loc[:,1] = (reg_loc[:,1] + reg_loc[:,3])/2
+            cls_loc[:,1] = (reg_loc[:,1] + reg_loc[:,4])/2
             cls_loc[:,2] = reg_loc[:,2]
             cls_loc[:,3] = (reg_loc[:,3] + reg_loc[:,4])/2
-            cls_loc[:,4] = (reg_loc[:,4] + reg_loc[:,0])/2
+            cls_loc[:,4] = (reg_loc[:,3] + reg_loc[:,0])/2
         if self.num_samples==9:
             reg_loc[:,[0,1,2], :,:, 0] -= bbox_pred_grad_mul[:,[0]]
             reg_loc[:,[3,4,5], :,:, 0] += d_loc[:,[0]]
