@@ -452,7 +452,7 @@ class BGMSCRefineHead(FCOSHead):
             reg_loc[:,[0,3,6], :,:, 1] -= bbox_pred_grad_mul[:,[1]]
             reg_loc[:,[1,4,7], :,:, 1] += d_loc[:,[1]]
             reg_loc[:,[2,5,8], :,:, 1] += bbox_pred_grad_mul[:,[3]]
-            cls_loc=reg_loc/2
+            cls_loc=(reg_loc+reg_loc[:,[4]])/2
         cls_loc[...,0] = cls_loc[...,0] / ((W-1) * stride)
         cls_loc[...,1] = cls_loc[...,1] / ((H-1) * stride)
         reg_loc[...,0] = reg_loc[...,0] / ((W-1) * stride)
