@@ -38,7 +38,6 @@ model = dict(
     bbox_head=dict(
         type='BGMSCRefineHead',
         cdf_conv=dict(num_heads=1, num_samples=5, use_pos=True, kernel_size=1),
-        num_samples=9,
         auto_weighted_loss=True,
         sample_weight=True,
         num_classes=1,
@@ -105,8 +104,16 @@ train_pipeline = [
     dict(type='DefaultFormatBundle'),
     dict(type='Collect', keys=['img', 'gt_bboxes', 'gt_labels']),
 ]
+data_root = './data/SSDD/'
 data = dict(
-    train=dict(pipeline=train_pipeline))
+    train=dict(ann_file=data_root + 'annotations/train.json',
+               img_prefix=data_root + 'images/train/',
+               pipeline=train_pipeline),
+    val=dict(ann_file=data_root + 'annotations/test.json',
+               img_prefix=data_root + 'images/test/'),
+    test=dict(ann_file=data_root + 'annotations/test.json',
+               img_prefix=data_root + 'images/test/'))
+
 optimizer = dict(type='SGD', lr=0.005, momentum=0.9, weight_decay=0.0001)
 optimizer_config = dict(grad_clip=None)
 lr_config = dict(
@@ -117,7 +124,7 @@ lr_config = dict(
     warmup_iters=1000,
     warmup_ratio=0.001)
 #
-runner=dict(type='IterBasedRunner', max_iters=72000)
+runner=dict(type='IterBasedRunner', max_iters=60000)
 # checkpoint_config = dict(interval=12)
 checkpoint_config = dict(interval=3000)
 auto_resume=True

@@ -38,7 +38,6 @@ model = dict(
     bbox_head=dict(
         type='BGMSCRefineHead',
         cdf_conv=dict(num_heads=1, num_samples=5, use_pos=True, kernel_size=1),
-        num_samples=9,
         auto_weighted_loss=True,
         sample_weight=True,
         num_classes=1,
@@ -105,9 +104,18 @@ train_pipeline = [
     dict(type='DefaultFormatBundle'),
     dict(type='Collect', keys=['img', 'gt_bboxes', 'gt_labels']),
 ]
+
+data_root = './data/HRSID/'
 data = dict(
-    train=dict(pipeline=train_pipeline))
-optimizer = dict(type='SGD', lr=0.005, momentum=0.9, weight_decay=0.0001)
+    train=dict(ann_file=data_root + 'annotations/train2017.json',
+               img_prefix=data_root + 'JPEGImages/',
+               pipeline=train_pipeline),
+    val=dict(ann_file=data_root + 'annotations/test2017.json',
+               img_prefix=data_root + 'JPEGImages/'),
+    test=dict(ann_file=data_root + 'annotations/test2017.json',
+               img_prefix=data_root + 'JPEGImages/'))
+
+optimizer = dict(type='SGD', lr=0.002, momentum=0.9, weight_decay=0.0001)
 optimizer_config = dict(grad_clip=None)
 lr_config = dict(
     policy='CosineAnnealing',
@@ -116,9 +124,7 @@ lr_config = dict(
     warmup='linear',
     warmup_iters=1000,
     warmup_ratio=0.001)
-#
-runner=dict(type='IterBasedRunner', max_iters=72000)
-# checkpoint_config = dict(interval=12)
+runner=dict(type='IterBasedRunner', max_iters=60000)
 checkpoint_config = dict(interval=3000)
 auto_resume=True
 fp16 = dict(loss_scale=512.)

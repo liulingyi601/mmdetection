@@ -51,6 +51,7 @@ model = dict(
         bbox_norm_type='reg_denom',
         reg_denoms=[8,16,32],
 
+        # bbox_norm_type='stride',
         strides=[4, 8, 16],
         center_sampling=False,
         dcn_on_last_conv=False,
@@ -106,6 +107,7 @@ train_pipeline = [
     dict(type='DefaultFormatBundle'),
     dict(type='Collect', keys=['img', 'gt_bboxes', 'gt_labels']),
 ]
+
 data_root = './data/HRSID/'
 data = dict(
     train=dict(ann_file=data_root + 'annotations/train2017.json',
@@ -115,7 +117,8 @@ data = dict(
                img_prefix=data_root + 'JPEGImages/'),
     test=dict(ann_file=data_root + 'annotations/test2017.json',
                img_prefix=data_root + 'JPEGImages/'))
-optimizer = dict(type='SGD', lr=0.005, momentum=0.9, weight_decay=0.0001)
+
+optimizer = dict(type='SGD', lr=0.002, momentum=0.9, weight_decay=0.0001)
 optimizer_config = dict(grad_clip=None)
 lr_config = dict(
     policy='CosineAnnealing',
@@ -124,9 +127,7 @@ lr_config = dict(
     warmup='linear',
     warmup_iters=1000,
     warmup_ratio=0.001)
-#
-runner=dict(type='IterBasedRunner', max_iters=30000)
-# checkpoint_config = dict(interval=12)
+runner=dict(type='IterBasedRunner', max_iters=60000)
 checkpoint_config = dict(interval=3000)
 auto_resume=True
 fp16 = dict(loss_scale=512.)
