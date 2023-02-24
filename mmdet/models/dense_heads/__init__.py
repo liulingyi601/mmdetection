@@ -43,6 +43,8 @@ from .yolof_head import YOLOFHead
 from .yolox_head import YOLOXHead
 from .bgms_refine_head import BGMSRefineHead
 from .bgms_c_refine_head import BGMSCRefineHead
+from .bgms_t_refine_head import BGMSTRefineHead
+
 __all__ = [
     'AnchorFreeHead', 'AnchorHead', 'GuidedAnchorHead', 'FeatureAdaption',
     'RPNHead', 'GARPNHead', 'RetinaHead', 'RetinaSepBNHead', 'GARetinaHead',
@@ -56,5 +58,5 @@ __all__ = [
     'DecoupledSOLOHead', 'CenterNetHead', 'YOLOXHead',
     'DecoupledSOLOLightHead', 'LADHead', 'TOODHead', 'MaskFormerHead',
     'Mask2FormerHead', 'BGMSRefineHead',
-    'Mask2FormerHead', 'SOLOV2Head', 'DDODHead', 'BGMSCRefineHead'
+    'Mask2FormerHead', 'SOLOV2Head', 'DDODHead', 'BGMSCRefineHead', 'BGMSTRefineHead'
 ]
