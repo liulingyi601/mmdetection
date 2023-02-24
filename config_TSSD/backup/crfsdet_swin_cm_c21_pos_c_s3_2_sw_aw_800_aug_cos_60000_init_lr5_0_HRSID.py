@@ -36,18 +36,23 @@ model = dict(
         norm_cfg=dict(type='GN', num_groups=32),
         num_outs=3),
     bbox_head=dict(
-        type='BGMSRefineHead',
-        cdf_conv=dict(num_heads=1, num_samples=5, use_pos=True),
+        type='BGMSCRefineHead',
+        cdf_conv=dict(num_heads=1, num_samples=5, use_pos=True, kernel_size=1),
         auto_weighted_loss=True,
         sample_weight=True,
         num_classes=1,
         in_channels=256,
         stacked_convs=2,
+        post_stacked_convs=1,
         feat_channels=256,
         # regress_ranges=((-1, 64), (64, 128), (128, 256), (256, 512), (512, INF)),
         regress_ranges=((-1, 32),(32, 64), (64, INF)),
         # strides=[8, 16, 32, 64, 128],
-        bbox_norm_type='stride',
+        bbox_norm_type='reg_denom',
+        reg_denoms=[6,12,24],
+
+        # bbox_norm_type='stride',
+        
         strides=[4, 8, 16],
         center_sampling=False,
         dcn_on_last_conv=False,
@@ -56,7 +61,7 @@ model = dict(
         anchor_generator=dict(
             type='AnchorGenerator',
             ratios=[1.0],
-            octave_base_scale=2,
+            octave_base_scale=3,
             scales_per_octave=1,
             center_offset=0.0,
             # strides=[8, 16, 32, 64, 128]),
@@ -91,7 +96,7 @@ train_pipeline = [
     dict(type='LoadAnnotations', with_bbox=True),
     dict(
         type='Resize',
-        img_scale=[(576, 576), (448,448)],
+        img_scale=[(880, 880), (720,720)],
         multiscale_mode='range',
         keep_ratio=True),
     dict(type='RandomFlip', flip_ratio=0.5,direction=['horizontal', 'vertical', 'diagonal']),
@@ -103,9 +108,36 @@ train_pipeline = [
     dict(type='DefaultFormatBundle'),
     dict(type='Collect', keys=['img', 'gt_bboxes', 'gt_labels']),
 ]
+test_pipeline = [
+    dict(type='LoadImageFromFile'),
+    dict(
+        type='MultiScaleFlipAug',
+        img_scale=[(800,800)],
+        # scale_factor=1.0,
+        flip=False,
+        transforms=[
+            dict(type='Resize', keep_ratio=True),
+            dict(type='RandomFlip'),
+            dict(type='Normalize', **img_norm_cfg),
+            dict(type='Pad', size_divisor=32),
+            dict(type='ImageToTensor', keys=['img']),
+            dict(type='Collect', keys=['img']),
+        ])
+]
+data_root = './data/HRSID/'
 data = dict(
-    train=dict(pipeline=train_pipeline))
-optimizer = dict(type='SGD', lr=0.002, momentum=0.9, weight_decay=0.0001)
+    samples_per_gpu=1,
+    workers_per_gpu=1,
+    train=dict(ann_file=data_root + 'annotations/train2017.json',
+               img_prefix=data_root + 'JPEGImages/',
+               pipeline=train_pipeline),
+    val=dict(ann_file=data_root + 'annotations/test2017.json',
+               img_prefix=data_root + 'JPEGImages/',
+               pipeline=test_pipeline),
+    test=dict(ann_file=data_root + 'annotations/test2017.json',
+               img_prefix=data_root + 'JPEGImages/',
+               pipeline=test_pipeline))
+optimizer = dict(type='SGD', lr=0.005, momentum=0.9, weight_decay=0.0001)
 optimizer_config = dict(grad_clip=None)
 lr_config = dict(
     policy='CosineAnnealing',
@@ -115,9 +147,9 @@ lr_config = dict(
     warmup_iters=1000,
     warmup_ratio=0.001)
 #
-runner=dict(type='IterBasedRunner', max_iters=54000)
+runner=dict(type='IterBasedRunner', max_iters=60000)
 # checkpoint_config = dict(interval=12)
 checkpoint_config = dict(interval=3000)
 auto_resume=True
-
+fp16 = dict(loss_scale=512.)
 evaluation=dict(interval=3000)

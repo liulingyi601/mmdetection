@@ -94,9 +94,10 @@ train_pipeline = [
         img_scale=[(576, 576), (448,448)],
         multiscale_mode='range',
         keep_ratio=True),
-    dict(type='FilterAnnotations', min_gt_bbox_wh=[4, 4]),
     dict(type='RandomFlip', flip_ratio=0.5,direction=['horizontal', 'vertical', 'diagonal']),
     dict(type='RandomShift', shift_ratio=0.5, max_shift_px=32),
+    dict(type='FilterAnnotations', min_gt_bbox_wh=[4, 4]),
+
     dict(type='Normalize', **img_norm_cfg),
     dict(type='Pad', size_divisor=32),
     dict(type='DefaultFormatBundle'),
@@ -117,5 +118,6 @@ lr_config = dict(
 runner=dict(type='IterBasedRunner', max_iters=54000)
 # checkpoint_config = dict(interval=12)
 checkpoint_config = dict(interval=3000)
+auto_resume=True
 
 evaluation=dict(interval=3000)

@@ -36,9 +36,9 @@ model = dict(
         norm_cfg=dict(type='GN', num_groups=32),
         num_outs=3),
     bbox_head=dict(
-        type='BGMSRefineHead',
-        cdf_conv=dict(num_heads=4, num_samples=5, use_pos=True,kernel_size=1),
-        auto_weighted_loss=True,
+        type='BGMSCRefineHead',
+        cdf_conv=dict(num_heads=4, num_samples=5, use_pos=True, kernel_size=1),
+        auto_weighted_loss=False,
         sample_weight=True,
         num_classes=1,
         in_channels=256,
@@ -106,7 +106,7 @@ train_pipeline = [
 ]
 data = dict(
     train=dict(pipeline=train_pipeline))
-optimizer = dict(type='SGD', lr=0.002, momentum=0.9, weight_decay=0.0001)
+optimizer = dict(type='SGD', lr=0.005, momentum=0.9, weight_decay=0.0001)
 optimizer_config = dict(grad_clip=None)
 lr_config = dict(
     policy='CosineAnnealing',
@@ -116,7 +116,7 @@ lr_config = dict(
     warmup_iters=1000,
     warmup_ratio=0.001)
 #
-runner=dict(type='IterBasedRunner', max_iters=54000)
+runner=dict(type='IterBasedRunner', max_iters=72000)
 # checkpoint_config = dict(interval=12)
 checkpoint_config = dict(interval=3000)
 auto_resume=True
