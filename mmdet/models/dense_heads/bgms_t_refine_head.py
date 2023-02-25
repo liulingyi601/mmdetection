@@ -142,7 +142,7 @@ class BGMSTRefineHead(FCOSHead):
                  num_classes,
                  in_channels,
                  cdf_conv=dict(num_heads=1, num_samples=5, use_pos=False, kernel_size=1),
-                 bbox_weight_cfg='pred',
+                #  bbox_weight_cfg='pred',
                  use_refine_vfl=True,
                  use_cross_deformable_conv=True,
                  sample_weight=False,
@@ -192,7 +192,7 @@ class BGMSTRefineHead(FCOSHead):
         # dcn base offsets, adapted from reppoints_head.py
         self.use_cross_deformable_conv=use_cross_deformable_conv
         self.weight_clamp=weight_clamp
-        self.bbox_weight_cfg=bbox_weight_cfg
+        # self.bbox_weight_cfg=bbox_weight_cfg
         self.cdf_conv=cdf_conv
         self.auto_weighted_loss = auto_weighted_loss
         self.sample_weight=sample_weight
@@ -781,18 +781,23 @@ class BGMSTRefineHead(FCOSHead):
             for i in range(sampling_result.num_gts):
                 sample_pos_ids = pos_gt_inds==i
                 sample_inds = pos_inds[sample_pos_ids]
-                if self.bbox_weight_cfg=='anchor':
-                    sample_weights = assign_result.max_overlaps[sample_inds]
-                    sample_weights_refine = assign_result.max_overlaps[sample_inds]
-                elif self.bbox_weight_cfg=='pred':
-                    sample_bbox_preds = pos_pre_boxes[sample_pos_ids]
-                    sample_bbox_preds_refine = pos_pre_boxes_refine[sample_pos_ids]
-                    sample_bbox_targets = pos_bbox_targets[sample_pos_ids]
-                    sample_weights = bbox_overlaps(sample_bbox_preds,sample_bbox_targets,is_aligned=True).clamp(min=1e-6)
-                    sample_weights_refine = bbox_overlaps(sample_bbox_preds_refine,sample_bbox_targets,is_aligned=True).clamp(min=1e-6)
-                elif self.bbox_weight_cfg=='cons':
-                    sample_weights=anchors.new_full((len(sample_inds), ), 1, dtype=torch.float)
-                    sample_weights_refine = anchors.new_full((len(sample_inds), ), 1, dtype=torch.float)
+                sample_bbox_preds = pos_pre_boxes[sample_pos_ids]
+                sample_bbox_preds_refine = pos_pre_boxes_refine[sample_pos_ids]
+                sample_bbox_targets = pos_bbox_targets[sample_pos_ids]
+                sample_weights = bbox_overlaps(sample_bbox_preds,sample_bbox_targets,is_aligned=True).clamp(min=1e-6)
+                sample_weights_refine = bbox_overlaps(sample_bbox_preds_refine,sample_bbox_targets,is_aligned=True).clamp(min=1e-6)
+                # if self.bbox_weight_cfg=='anchor':
+                #     sample_weights = assign_result.max_overlaps[sample_inds]
+                #     sample_weights_refine = assign_result.max_overlaps[sample_inds]
+                # elif self.bbox_weight_cfg=='pred':
+                #     sample_bbox_preds = pos_pre_boxes[sample_pos_ids]
+                #     sample_bbox_preds_refine = pos_pre_boxes_refine[sample_pos_ids]
+                #     sample_bbox_targets = pos_bbox_targets[sample_pos_ids]
+                #     sample_weights = bbox_overlaps(sample_bbox_preds,sample_bbox_targets,is_aligned=True).clamp(min=1e-6)
+                #     sample_weights_refine = bbox_overlaps(sample_bbox_preds_refine,sample_bbox_targets,is_aligned=True).clamp(min=1e-6)
+                # elif self.bbox_weight_cfg=='cons':
+                #     sample_weights=anchors.new_full((len(sample_inds), ), 1, dtype=torch.float)
+                #     sample_weights_refine = anchors.new_full((len(sample_inds), ), 1, dtype=torch.float)
                 if self.sample_weight==True:
                     avg_factor = sample_weights.sum()
                     avg_factor_refine = sample_weights_refine.sum()
