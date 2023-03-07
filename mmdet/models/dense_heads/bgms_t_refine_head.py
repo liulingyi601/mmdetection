@@ -144,7 +144,6 @@ class BGMSTRefineHead(FCOSHead):
                  cdf_conv=dict(num_heads=1, num_samples=5, use_pos=False, kernel_size=1),
                 #  bbox_weight_cfg='pred',
                  use_refine_vfl=True,
-                 use_cross_deformable_conv=True,
                  sample_weight=False,
                  num_samples=5,
                  stacked_convs=2,
@@ -189,8 +188,6 @@ class BGMSTRefineHead(FCOSHead):
                                dict(type='Normal', name='vfnet_reg_conv_weight', std=0.01, bias_prob=0.01),
                                dict(type='Normal', name='vfnet_cls_conv_weight', std=0.01, bias_prob=0.01),]),
                  **kwargs):
-        # dcn base offsets, adapted from reppoints_head.py
-        self.use_cross_deformable_conv=use_cross_deformable_conv
         self.weight_clamp=weight_clamp
         # self.bbox_weight_cfg=bbox_weight_cfg
         self.cdf_conv=cdf_conv
@@ -200,17 +197,7 @@ class BGMSTRefineHead(FCOSHead):
         self.num_samples=num_samples
         self.stacked_convs=stacked_convs
         self.post_stacked_convs=post_stacked_convs
-        if not self.use_cross_deformable_conv:
-            self.num_dconv_points = 9
-            self.dcn_kernel = int(np.sqrt(self.num_dconv_points))
-            self.dcn_pad = int((self.dcn_kernel - 1) / 2)
-            dcn_base = np.arange(-self.dcn_pad, self.dcn_pad + 1).astype(np.float64)
-            dcn_base_y = np.repeat(dcn_base, self.dcn_kernel)
-            dcn_base_x = np.tile(dcn_base, self.dcn_kernel)
-            dcn_base_offset = np.stack([dcn_base_y, dcn_base_x], axis=1).reshape((-1))
-            self.dcn_base_offset = torch.tensor(dcn_base_offset).view(1, -1, 1, 1)
-            init_cfg=dict(type='Xavier', layer='Conv2d', distribution='uniform',
-                          override=[dict(type='Normal', name='vfnet_cls', std=0.01, bias_prob=0.01)])
+
         super(FCOSHead, self).__init__(
             num_classes,
             in_channels,
@@ -304,25 +291,11 @@ class BGMSTRefineHead(FCOSHead):
         self.vfnet_reg_refine = nn.Conv2d(self.feat_channels, 4, 1)
         self.scales_refine = ModuleList([Scale(1.0) for _ in self.strides])
         self.vfnet_cls = nn.Conv2d(self.feat_channels, self.cls_out_channels, 1)
+        self.vfnet_reg_conv_weight = nn.Conv2d(self.feat_channels, self.num_samples * len(self.strides), 1)
+        self.vfnet_cls_conv_weight = nn.Conv2d(self.feat_channels, self.num_samples * len(self.strides), 1)
+        self.reg_conv = nn.Conv2d(self.feat_channels, self.feat_channels, 1)
+        self.cls_conv = nn.Conv2d(self.feat_channels, self.feat_channels, 1)
 
-        if self.use_cross_deformable_conv:
-            self.vfnet_reg_conv_weight = nn.Conv2d(self.feat_channels, self.num_samples * len(self.strides), 1)
-            self.vfnet_cls_conv_weight = nn.Conv2d(self.feat_channels, self.num_samples * len(self.strides), 1)
-            self.reg_conv = nn.Conv2d(self.feat_channels, self.feat_channels, 1)
-            self.cls_conv = nn.Conv2d(self.feat_channels, self.feat_channels, 1)
-        else:
-            self.vfnet_reg_refine_dconv=DeformConv2d(
-            self.feat_channels,
-            self.feat_channels,
-            self.dcn_kernel,
-            1,
-            padding=self.dcn_pad)
-            self.vfnet_cls_dconv=DeformConv2d(
-            self.feat_channels,
-            self.feat_channels,
-            self.dcn_kernel,
-            1,
-            padding=self.dcn_pad)
         if self.auto_weighted_loss:
             self.auto_loss_weights = nn.Parameter(torch.zeros(3))
 
