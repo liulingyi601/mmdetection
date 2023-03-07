@@ -582,7 +582,7 @@ class BGMSTRefineHead(FCOSHead):
         else:
             loss_bbox = flatten_pre_boxes.sum() * 0
             loss_bbox_refine = flatten_pre_boxes_refine.sum() * 0
-        # pdb.set_trace()
+        pdb.set_trace()
         if self.use_vfl:
             loss_cls = self.loss_cls(
                 flatten_cls_scores,
@@ -772,7 +772,6 @@ class BGMSTRefineHead(FCOSHead):
         pos_pre_boxes_refine = anchors.new_full((num_pos, 4), 0, dtype=torch.float)
         pos_bbox_weights = anchors.new_full((num_pos, ), 0, dtype=torch.float)
         pos_bbox_weights_refine = anchors.new_full((num_pos, ), 0, dtype=torch.float)
-        all_labels = anchors.new_full((num_valid_anchors, self.num_classes), 0, dtype=torch.float)
         all_label_weights = anchors.new_zeros(num_valid_anchors, dtype=torch.float)
         if num_pos > 0:
             pos_bbox_targets[:, :] = sampling_result.pos_gt_bboxes
@@ -807,12 +806,14 @@ class BGMSTRefineHead(FCOSHead):
                 pos_bbox_weights[sample_pos_ids] = sample_weights / avg_factor
                 pos_bbox_weights_refine[sample_pos_ids] = sample_weights_refine /avg_factor_refine
                 if self.use_vfl:
+                    all_labels = anchors.new_full((num_valid_anchors, self.num_classes), 0, dtype=torch.float)
                     if self.use_refine_vfl:
                         all_labels[sample_inds,gt_labels[i]]=sample_weights_refine
                     else:
                         all_labels[sample_inds,gt_labels[i]]=sample_weights
                 else:
-                    all_labels[sample_inds,gt_labels[i]]=1
+                    all_labels = anchors.new_full((num_valid_anchors, ), self.num_classes, dtype=torch.long)
+                    all_labels[sample_inds]=gt_labels[i]
             if self.train_cfg.pos_weight <= 0:
                 all_label_weights[pos_inds] = 1.0
             else:
