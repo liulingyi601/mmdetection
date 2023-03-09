@@ -143,15 +143,12 @@ class BGMSTRefineHead(FCOSHead):
                  in_channels,
                  cdf_conv=dict(num_heads=1, num_samples=5, use_pos=False, kernel_size=1),
                 #  bbox_weight_cfg='pred',
-                 use_refine_vfl=True,
                  sample_weight=False,
                  num_samples=5,
                  stacked_convs=2,
                  post_stacked_convs=0,
                  auto_weighted_loss=False,
                  weight_clamp=True,
-                 regress_ranges=((-1, 64), (64, 128), (128, 256), (256, 512),
-                                 (512, INF)),
                  reg_denoms=[32,64,128],
                  center_sampling=False,
                  center_sample_radius=1.5,
@@ -193,7 +190,6 @@ class BGMSTRefineHead(FCOSHead):
         self.cdf_conv=cdf_conv
         self.auto_weighted_loss = auto_weighted_loss
         self.sample_weight=sample_weight
-        self.use_refine_vfl=use_refine_vfl
         self.num_samples=num_samples
         self.stacked_convs=stacked_convs
         self.post_stacked_convs=post_stacked_convs
@@ -783,10 +779,7 @@ class BGMSTRefineHead(FCOSHead):
                 pos_bbox_weights[sample_pos_ids] = sample_weights / avg_factor
                 pos_bbox_weights_refine[sample_pos_ids] = sample_weights_refine /avg_factor_refine
                 if self.use_vfl:
-                    if self.use_refine_vfl:
-                        all_labels[sample_inds,gt_labels[i]]=sample_weights_refine
-                    else:
-                        all_labels[sample_inds,gt_labels[i]]=sample_weights
+                    all_labels[sample_inds,gt_labels[i]]=sample_weights_refine
                 else:
                     all_labels[sample_inds]=gt_labels[i]
             if self.train_cfg.pos_weight <= 0:
