@@ -164,11 +164,8 @@ class BGMSTRefineHead(FCOSHead):
                  auto_weighted_loss=False,
                  weight_clamp=True,
                  reg_denoms=[32,64,128],
-                 center_sampling=False,
-                 center_sample_radius=1.5,
                  sync_num_pos=True,
                  gradient_mul=0.1,
-                 bbox_norm_type='reg_denom',
                  loss_cls_fl=dict(
                      type='FocalLoss',
                      use_sigmoid=True,
@@ -186,7 +183,6 @@ class BGMSTRefineHead(FCOSHead):
                  loss_bbox=dict(type='GIoULoss', loss_weight=1.5),
                  loss_bbox_refine=dict(type='GIoULoss', loss_weight=2.0),
                  norm_cfg=dict(type='GN', num_groups=32, requires_grad=True),
-                 reg_decoded_bbox=True,
                  anchor_generator=dict(
                      type='AnchorGenerator',
                      ratios=[1.0],
@@ -219,10 +215,7 @@ class BGMSTRefineHead(FCOSHead):
         self.reg_denoms = reg_denoms
         self.num_stage = len(self.strides)
         # self.reg_denoms[-1] = self.reg_denoms[-2] * 2
-        self.center_sampling = center_sampling
-        self.center_sample_radius = center_sample_radius
         self.sync_num_pos = sync_num_pos
-        self.bbox_norm_type = bbox_norm_type
         self.gradient_mul = gradient_mul
         self.use_vfl = use_vfl
         if self.use_vfl:
@@ -231,7 +224,6 @@ class BGMSTRefineHead(FCOSHead):
             self.loss_cls = build_loss(loss_cls_fl)
         self.loss_bbox = build_loss(loss_bbox)
         self.loss_bbox_refine = build_loss(loss_bbox_refine)
-        self.reg_decoded_bbox = reg_decoded_bbox
         self.use_sigmoid_cls = loss_cls.get('use_sigmoid', False)
         self.anchor_center_offset = anchor_generator.get('center_offset', 0.0)
         self.num_base_priors = self.prior_generator.num_base_priors[0]
@@ -358,13 +350,7 @@ class BGMSTRefineHead(FCOSHead):
             N, _, W, H = reg_feats[i].size()
             reg_feat_init = self.vfnet_reg_conv(reg_feats[i])
 
-            if self.bbox_norm_type == 'reg_denom':
-                bbox_pred = self.scales[i](
-                    self.vfnet_reg(reg_feat_init)).exp() * self.reg_denoms[i]
-            elif self.bbox_norm_type == 'stride':
-                bbox_pred = self.scales[i](self.vfnet_reg(reg_feat_init)).exp() * self.strides[i]
-            else:
-                raise NotImplementedError
+            bbox_pred = self.scales[i](self.vfnet_reg(reg_feat_init)).exp() * self.reg_denoms[i]
             reg_feat_weight = F.softmax(self.vfnet_reg_conv_weight(reg_feat_init),dim=1)
             cls_feat_weight = F.softmax(self.vfnet_cls_conv_weight(reg_feat_init),dim=1)
             reg_loc, cls_loc, d_loc, m_wh = self.gen_sample_location_c(bbox_pred, all_level_points[i], self.strides[i])
