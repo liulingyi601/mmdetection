@@ -62,7 +62,7 @@ class cross_conv(BaseModule):
 
 
 class cross_deformable_conv(BaseModule):
-    def __init__(self, strides, in_channles,cdf_conv, 
+    def __init__(self, strides, in_channles,cdf_conv,
                 init_cfg=[dict(type='Xavier', layer='Conv2d', distribution='uniform',override=dict(type='Normal',name='weight_conv', std=0.01,bias_prob=0.01)),
                           dict(type='Constant', layer='LayerNorm', val=1.0),
                           dict(type='TruncNormal', layer='Linear', std=.02, bias=0.)]):
@@ -74,6 +74,7 @@ class cross_deformable_conv(BaseModule):
         self.num_heads = cdf_conv.num_heads
         self.in_channles = in_channles
         self.use_pos = cdf_conv.use_pos
+        self.dropout=cdf_conv.dropout
         self.kernel_size=cdf_conv.kernel_size
         self.num_head_channles = int(in_channles / self.num_heads)
         assert self.num_head_channles*self.num_heads == self.in_channles
@@ -82,14 +83,26 @@ class cross_deformable_conv(BaseModule):
         self.weight_conv = nn.Conv2d(in_channles, self.num_samples * self.num_heads * self.num_levels, self.kernel_size, padding=self.kernel_size//2)
         if self.use_pos:
             self.level_embeds = nn.Parameter(torch.Tensor(self.num_levels, self.in_channles))
-        self.norm_conv = nn.Conv2d(in_channles, in_channles, 1)
-
         self.norm_layer1 = nn.LayerNorm(in_channles)
-        self.FFN = Sequential(
-                    nn.Linear(in_channles, in_channles*2), 
-                    nn.ReLU(inplace=True),
-                    nn.Linear(in_channles*2, in_channles))
         self.norm_layer2 = nn.LayerNorm(in_channles)
+        if self.dropout:
+            self.norm_conv=Sequential(nn.Conv2d(in_channles, in_channles, 1), nn.Dropout(0.1))
+            self.FFN = Sequential(
+                        nn.Linear(in_channles, in_channles*4), 
+                        nn.ReLU(inplace=True),
+                        nn.Dropout(0.1),
+                        nn.Linear(in_channles*4, in_channles*4),                        
+                        nn.ReLU(inplace=True),
+                        nn.Dropout(0.1),
+                        nn.Linear(in_channles*4, in_channles),
+                        nn.Dropout(0.1))
+        else:
+            self.norm_conv = nn.Conv2d(in_channles, in_channles, 1)
+            
+            self.FFN = Sequential(
+                        nn.Linear(in_channles, in_channles*2), 
+                        nn.ReLU(inplace=True),
+                        nn.Linear(in_channles*2, in_channles))
 
     def forward(self, feats, all_level_feat_points, positional_encodings=None):
         queries = []
@@ -121,6 +134,7 @@ class cross_deformable_conv(BaseModule):
                 *sample_weight[:,None, j*self.num_samples:(j+1)*self.num_samples]).sum(2) #b*nh, nhc, H*W
             sample_feat = sample_feat.view(N, -1, H, W)
             out_feat = self.norm_conv(sample_feat) + feats[i]#b,c,H,W
+
             out_feat = out_feat.permute(0,2,3,1)
             out_feat = self.norm_layer1(out_feat)
             out_feat = self.FFN(out_feat) + out_feat
@@ -141,7 +155,7 @@ class BGMSTRefineHead(FCOSHead):
     def __init__(self,
                  num_classes,
                  in_channels,
-                 cdf_conv=dict(num_heads=1, num_samples=5, use_pos=False, kernel_size=1),
+                 cdf_conv=dict(num_heads=1, num_samples=5, use_pos=False, kernel_size=1, dropout=False),
                 #  bbox_weight_cfg='pred',
                  sample_weight=False,
                  num_samples=5,
