@@ -74,7 +74,7 @@ class cross_deformable_conv(BaseModule):
         self.num_heads = cdf_conv.num_heads
         self.in_channles = in_channles
         self.use_pos = cdf_conv.use_pos
-        self.dropout=cdf_conv.dropout
+        self.dropout=cdf_conv.get('dropout',None)
         self.kernel_size=cdf_conv.kernel_size
         self.num_head_channles = int(in_channles / self.num_heads)
         assert self.num_head_channles*self.num_heads == self.in_channles
@@ -82,10 +82,11 @@ class cross_deformable_conv(BaseModule):
         self.offset_conv = nn.Conv2d(in_channles, self.num_samples * self.num_heads * self.num_levels *2, self.kernel_size,padding=self.kernel_size//2)
         self.weight_conv = nn.Conv2d(in_channles, self.num_samples * self.num_heads * self.num_levels, self.kernel_size, padding=self.kernel_size//2)
         if self.use_pos:
-            self.level_embeds = nn.Parameter(torch.Tensor(self.num_levels, self.in_channles))
+            # 创建可学习参数
+            self.level_embeds = torch.Tensor(self.num_levels, self.in_channles)
         self.norm_layer1 = nn.LayerNorm(in_channles)
         self.norm_layer2 = nn.LayerNorm(in_channles)
-        if self.dropout:
+        if self.dropout is not None:
             self.norm_conv=Sequential(nn.Conv2d(in_channles, in_channles, 1), nn.Dropout(0.1))
             self.FFN = Sequential(
                         nn.Linear(in_channles, in_channles*4), 
@@ -107,7 +108,7 @@ class cross_deformable_conv(BaseModule):
     def forward(self, feats, all_level_feat_points, positional_encodings=None):
         queries = []
         values=[]
-        if self.use_pos:
+        if self.use_pos and positional_encodings is not None:
             for i, feat in enumerate(feats): 
                 N, _, H, W = feat.size()
                 values.append(self.value_conv(feat).view(N*self.num_heads,self.num_head_channles, H, W))
@@ -129,11 +130,12 @@ class cross_deformable_conv(BaseModule):
             offset[...,1] = (offset[...,1] + points[None,None, :, 1]) / (H-1)
             sample_location = offset * 2 - 1#b*nh,nl*ns,H*W,2
             sample_feat = 0
+            # pdb.set_trace()
             for j in range(self.num_levels):
                 sample_feat += (F.grid_sample(values[j], sample_location[:,j*self.num_samples:(j+1)*self.num_samples], mode='bilinear',padding_mode='zeros',align_corners=True) \
                 *sample_weight[:,None, j*self.num_samples:(j+1)*self.num_samples]).sum(2) #b*nh, nhc, H*W
-            sample_feat = sample_feat.view(N, -1, H, W)
-            out_feat = self.norm_conv(sample_feat) + feats[i]#b,c,H,W
+            sample_feat = sample_feat.view(N, -1, H, W) # type: ignore
+            out_feat = self.norm_conv(sample_feat) + feats[i]#b,c,H,
 
             out_feat = out_feat.permute(0,2,3,1)
             out_feat = self.norm_layer1(out_feat)
@@ -155,20 +157,18 @@ class BGMSTRefineHead(FCOSHead):
     def __init__(self,
                  num_classes,
                  in_channels,
-                 cdf_conv=dict(num_heads=1, num_samples=5, use_pos=False, kernel_size=1, dropout=False),
+                 cdf_conv=dict(num_heads=1, num_samples=5, use_pos=False, kernel_size=1),
                 #  bbox_weight_cfg='pred',
                  sample_weight=False,
+                 cls_sample_weight=False,
                  num_samples=5,
                  stacked_convs=2,
                  post_stacked_convs=0,
                  auto_weighted_loss=False,
                  weight_clamp=True,
                  reg_denoms=[32,64,128],
-                 center_sampling=False,
-                 center_sample_radius=1.5,
                  sync_num_pos=True,
                  gradient_mul=0.1,
-                 bbox_norm_type='reg_denom',
                  loss_cls_fl=dict(
                      type='FocalLoss',
                      use_sigmoid=True,
@@ -186,7 +186,6 @@ class BGMSTRefineHead(FCOSHead):
                  loss_bbox=dict(type='GIoULoss', loss_weight=1.5),
                  loss_bbox_refine=dict(type='GIoULoss', loss_weight=2.0),
                  norm_cfg=dict(type='GN', num_groups=32, requires_grad=True),
-                 reg_decoded_bbox=True,
                  anchor_generator=dict(
                      type='AnchorGenerator',
                      ratios=[1.0],
@@ -204,10 +203,10 @@ class BGMSTRefineHead(FCOSHead):
         self.cdf_conv=cdf_conv
         self.auto_weighted_loss = auto_weighted_loss
         self.sample_weight=sample_weight
+        self.cls_sample_weight=cls_sample_weight
         self.num_samples=num_samples
         self.stacked_convs=stacked_convs
         self.post_stacked_convs=post_stacked_convs
-
         super(FCOSHead, self).__init__(
             num_classes,
             in_channels,
@@ -219,10 +218,7 @@ class BGMSTRefineHead(FCOSHead):
         self.reg_denoms = reg_denoms
         self.num_stage = len(self.strides)
         # self.reg_denoms[-1] = self.reg_denoms[-2] * 2
-        self.center_sampling = center_sampling
-        self.center_sample_radius = center_sample_radius
         self.sync_num_pos = sync_num_pos
-        self.bbox_norm_type = bbox_norm_type
         self.gradient_mul = gradient_mul
         self.use_vfl = use_vfl
         if self.use_vfl:
@@ -231,7 +227,6 @@ class BGMSTRefineHead(FCOSHead):
             self.loss_cls = build_loss(loss_cls_fl)
         self.loss_bbox = build_loss(loss_bbox)
         self.loss_bbox_refine = build_loss(loss_bbox_refine)
-        self.reg_decoded_bbox = reg_decoded_bbox
         self.use_sigmoid_cls = loss_cls.get('use_sigmoid', False)
         self.anchor_center_offset = anchor_generator.get('center_offset', 0.0)
         self.num_base_priors = self.prior_generator.num_base_priors[0]
@@ -269,10 +264,10 @@ class BGMSTRefineHead(FCOSHead):
             self.cls_layer.append(cross_deformable_conv(self.strides, self.feat_channels, self.cdf_conv))
             self.reg_layer.append(cross_deformable_conv(self.strides, self.feat_channels, self.cdf_conv))
         for i in range(self.post_stacked_convs):
-            if self.dcn_on_last_conv and i == self.stacked_convs - 1:
-                conv_cfg = dict(type='DCNv2')
-            else:
-                conv_cfg = self.conv_cfg
+            # if self.dcn_on_last_conv and i == self.stacked_convs - 1:
+            #     conv_cfg = dict(type='DCNv2')
+            # else:
+            conv_cfg = self.conv_cfg
             self.cls_layer.append(
                 cross_conv(
                     self.feat_channels,
@@ -307,7 +302,7 @@ class BGMSTRefineHead(FCOSHead):
         self.cls_conv = nn.Conv2d(self.feat_channels, self.feat_channels, 1)
 
         if self.auto_weighted_loss:
-            self.auto_loss_weights = nn.Parameter(torch.zeros(3))
+            self.auto_loss_weights = torch.zeros(3)
 
 
     def forward(self, feats):
@@ -358,13 +353,7 @@ class BGMSTRefineHead(FCOSHead):
             N, _, W, H = reg_feats[i].size()
             reg_feat_init = self.vfnet_reg_conv(reg_feats[i])
 
-            if self.bbox_norm_type == 'reg_denom':
-                bbox_pred = self.scales[i](
-                    self.vfnet_reg(reg_feat_init)).exp() * self.reg_denoms[i]
-            elif self.bbox_norm_type == 'stride':
-                bbox_pred = self.scales[i](self.vfnet_reg(reg_feat_init)).exp() * self.strides[i]
-            else:
-                raise NotImplementedError
+            bbox_pred = self.scales[i](self.vfnet_reg(reg_feat_init)).exp() * self.reg_denoms[i]
             reg_feat_weight = F.softmax(self.vfnet_reg_conv_weight(reg_feat_init),dim=1)
             cls_feat_weight = F.softmax(self.vfnet_cls_conv_weight(reg_feat_init),dim=1)
             reg_loc, cls_loc, d_loc, m_wh = self.gen_sample_location_c(bbox_pred, all_level_points[i], self.strides[i])
@@ -456,7 +445,7 @@ class BGMSTRefineHead(FCOSHead):
         Returns:
             dcn_offsets (Tensor): The offsets for deformable convolution.
         """
-        dcn_base_offset = self.dcn_base_offset.type_as(bbox_pred)
+        dcn_base_offset = self.dcn_base_offset.type_as(bbox_pred) # type: ignore
         bbox_pred_grad_mul = (1 - gradient_mul) * bbox_pred.detach() + \
             gradient_mul * bbox_pred
         # map to the feature map scale
@@ -467,7 +456,7 @@ class BGMSTRefineHead(FCOSHead):
         y1 = bbox_pred_grad_mul[:, 1, :, :]
         x2 = bbox_pred_grad_mul[:, 2, :, :]
         y2 = bbox_pred_grad_mul[:, 3, :, :]
-        bbox_pred_grad_mul_offset = bbox_pred.new_zeros(N, 2 * self.num_dconv_points, H, W)
+        bbox_pred_grad_mul_offset = bbox_pred.new_zeros(N, 2 * self.num_dconv_points, H, W) # type: ignore
         bbox_pred_grad_mul_offset[:, 0, :, :] = -1.0 * y1  # -y1
         bbox_pred_grad_mul_offset[:, 1, :, :] = -1.0 * x1  # -x1
         bbox_pred_grad_mul_offset[:, 2, :, :] = -1.0 * y1  # -y1
@@ -522,8 +511,8 @@ class BGMSTRefineHead(FCOSHead):
         bbox_preds_list = levels_to_images(bbox_preds)
         bbox_preds_refine_list = levels_to_images(bbox_preds_refine)
         cls_scores_list = levels_to_images(cls_scores)
-        all_labels, all_label_weights, pos_bbox_targets, pos_pre_boxes, pos_pre_boxes_refine, pos_bbox_weights, pos_bbox_weights_refine = self.get_targets(
-            bbox_preds_list, bbox_preds_refine_list, featmap_sizes, gt_bboxes, gt_labels, img_metas, gt_bboxes_ignore)
+        all_labels, all_label_weights, pos_bbox_targets, pos_pre_boxes, pos_pre_boxes_refine, pos_bbox_weights, pos_bbox_weights_refine = \
+            self.get_targets(bbox_preds_list, bbox_preds_refine_list, featmap_sizes, gt_bboxes, gt_labels, img_metas, gt_bboxes_ignore) # type: ignore
         # labels:list(N*tensor[n_anchors, n_classes])
         # label_weights:list(N*tensor[n_anchors])
         # bbox_targets,pre_boxes,pre_boxes_refine:list(N*tensor(n_pos, 4))
@@ -772,34 +761,27 @@ class BGMSTRefineHead(FCOSHead):
                 sample_bbox_targets = pos_bbox_targets[sample_pos_ids]
                 sample_weights = bbox_overlaps(sample_bbox_preds,sample_bbox_targets,is_aligned=True).clamp(min=1e-6)
                 sample_weights_refine = bbox_overlaps(sample_bbox_preds_refine,sample_bbox_targets,is_aligned=True).clamp(min=1e-6)
-                # if self.bbox_weight_cfg=='anchor':
-                #     sample_weights = assign_result.max_overlaps[sample_inds]
-                #     sample_weights_refine = assign_result.max_overlaps[sample_inds]
-                # elif self.bbox_weight_cfg=='pred':
-                #     sample_bbox_preds = pos_pre_boxes[sample_pos_ids]
-                #     sample_bbox_preds_refine = pos_pre_boxes_refine[sample_pos_ids]
-                #     sample_bbox_targets = pos_bbox_targets[sample_pos_ids]
-                #     sample_weights = bbox_overlaps(sample_bbox_preds,sample_bbox_targets,is_aligned=True).clamp(min=1e-6)
-                #     sample_weights_refine = bbox_overlaps(sample_bbox_preds_refine,sample_bbox_targets,is_aligned=True).clamp(min=1e-6)
-                # elif self.bbox_weight_cfg=='cons':
-                #     sample_weights=anchors.new_full((len(sample_inds), ), 1, dtype=torch.float)
-                #     sample_weights_refine = anchors.new_full((len(sample_inds), ), 1, dtype=torch.float)
+
                 if self.sample_weight==True:
                     avg_factor = sample_weights.sum()
                     avg_factor_refine = sample_weights_refine.sum()
                 else:
                     avg_factor=1
                     avg_factor_refine=1
+                if self.cls_sample_weight==True:
+                    avg_factor_cls = sample_weights_refine.sum()
+                else:
+                    avg_factor_cls=1
                 pos_bbox_weights[sample_pos_ids] = sample_weights / avg_factor
                 pos_bbox_weights_refine[sample_pos_ids] = sample_weights_refine /avg_factor_refine
                 if self.use_vfl:
-                    all_labels[sample_inds,gt_labels[i]]=sample_weights_refine
+                    all_labels[sample_inds,gt_labels[i]]=sample_weights_refine /avg_factor_cls
                 else:
                     all_labels[sample_inds]=gt_labels[i]
-            if self.train_cfg.pos_weight <= 0:
+            if self.train_cfg.pos_weight <= 0: # type: ignore
                 all_label_weights[pos_inds] = 1.0
             else:
-                all_label_weights[pos_inds] = self.train_cfg.pos_weight
+                all_label_weights[pos_inds] = self.train_cfg.pos_weight # type: ignore
         if len(neg_inds) > 0:
             all_label_weights[neg_inds] = 1.0
         if unmap_outputs:
