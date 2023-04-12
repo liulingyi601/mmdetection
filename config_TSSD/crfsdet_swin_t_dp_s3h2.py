@@ -37,7 +37,7 @@ model = dict(
         num_outs=3),
     bbox_head=dict(
         type='BGMSTRefineHead',
-        cdf_conv=dict(num_heads=1, num_samples=5, use_pos=True, kernel_size=1),
+        cdf_conv=dict(num_heads=2, num_samples=3, use_pos=True, dropout=True,kernel_size=1),
         auto_weighted_loss=True,
         sample_weight=True,
         num_classes=1,
@@ -45,22 +45,17 @@ model = dict(
         stacked_convs=2,
         post_stacked_convs=1,
         feat_channels=256,
-        # regress_ranges=((-1, 64), (64, 128), (128, 256), (256, 512), (512, INF)),
-        # strides=[8, 16, 32, 64, 128],
-        bbox_norm_type='stride',
+        reg_denoms=[4, 8, 16],
         strides=[4, 8, 16],
-        center_sampling=False,
         dcn_on_last_conv=False,
         # use_atss=True,
         use_vfl=True,
-        use_refine_vfl=True,
         anchor_generator=dict(
             type='AnchorGenerator',
             ratios=[1.0],
             octave_base_scale=2,
             scales_per_octave=1,
             center_offset=0.0,
-            # strides=[8, 16, 32, 64, 128]),
             strides=[4, 8, 16]),
         loss_cls=dict(
             type='VarifocalLoss',
@@ -104,7 +99,9 @@ train_pipeline = [
     dict(type='DefaultFormatBundle'),
     dict(type='Collect', keys=['img', 'gt_bboxes', 'gt_labels']),
 ]
-data = dict(
+data = dict(    
+    samples_per_gpu=1,
+    workers_per_gpu=1,
     train=dict(pipeline=train_pipeline))
 optimizer = dict(type='SGD', lr=0.005, momentum=0.9, weight_decay=0.0001)
 optimizer_config = dict(grad_clip=None)

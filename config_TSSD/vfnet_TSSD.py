@@ -2,72 +2,57 @@ _base_ = [
     './TSSD.py',
     './_base_/default_runtime.py'
 ]
-INF = 1e8
-pretrained = 'https://github.com/SwinTransformer/storage/releases/download/v1.0.0/swin_tiny_patch4_window7_224.pth'  # noqa
-
 # model settings
+INF = 1e8
+
 model = dict(
     type='VFNet',
-    backbone=dict(  
-        # _delete_=True,
-        type='SwinTransformer',
-        embed_dims=96,
-        depths=[2, 2, 6,2],
-        num_heads=[3, 6, 12,24],
-        strides=(4, 2, 2,2),
-        window_size=7,
-        mlp_ratio=4,
-        qkv_bias=True,
-        qk_scale=None,
-        drop_rate=0.,
-        attn_drop_rate=0.,
-        drop_path_rate=0.2,
-        patch_norm=True,
-        out_indices=(0, 1, 2),
-        with_cp=False,
-        convert_weights=True,
-        init_cfg=dict(type='Pretrained', checkpoint=pretrained)),
+    backbone=dict(
+        type='ResNet',
+        depth=50,
+        num_stages=4,
+        out_indices=(0, 1, 2, 3),
+        frozen_stages=1,
+        norm_cfg=dict(type='BN', requires_grad=True),
+        norm_eval=True,
+        style='pytorch',
+        init_cfg=dict(type='Pretrained', checkpoint='torchvision://resnet50')),
     neck=dict(
-        type='ChannelMapper',
-        in_channels=[96, 192, 384],
-        kernel_size=1,
+        type='FPN',
+        in_channels=[256, 512, 1024, 2048],
         out_channels=256,
-        act_cfg=None,
-        norm_cfg=dict(type='GN', num_groups=32),
-        num_outs=3),
+        start_level=0,
+        add_extra_convs='on_output',  # use P5
+        num_outs=5,
+        relu_before_extra_convs=True),
     bbox_head=dict(
-        type='BGMSTRefineHead',
-        cdf_conv=dict(num_heads=1, num_samples=5, use_pos=True, kernel_size=1),
-        auto_weighted_loss=True,
-        sample_weight=True,
+        type='VFNetHead',
         num_classes=1,
         in_channels=256,
-        stacked_convs=2,
-        post_stacked_convs=1,
+        stacked_convs=3,
         feat_channels=256,
         # regress_ranges=((-1, 64), (64, 128), (128, 256), (256, 512), (512, INF)),
+        regress_ranges=((-1, 8), (8, 16), (16, 32), (32, 64), (64, INF)),
+
         # strides=[8, 16, 32, 64, 128],
-        bbox_norm_type='stride',
-        strides=[4, 8, 16],
+        strides=[4, 8, 16, 32, 64],
         center_sampling=False,
         dcn_on_last_conv=False,
-        # use_atss=True,
+        use_atss=True,
         use_vfl=True,
-        use_refine_vfl=True,
         anchor_generator=dict(
             type='AnchorGenerator',
             ratios=[1.0],
             octave_base_scale=2,
             scales_per_octave=1,
             center_offset=0.0,
-            # strides=[8, 16, 32, 64, 128]),
-            strides=[4, 8, 16]),
+            strides=[4, 8, 16, 32, 64,]),
         loss_cls=dict(
             type='VarifocalLoss',
             use_sigmoid=True,
             alpha=0.75,
             gamma=2.0,
-            iou_weighted=False,
+            iou_weighted=True,
             loss_weight=1.0),
         loss_bbox=dict(type='GIoULoss', loss_weight=1.5),
         loss_bbox_refine=dict(type='GIoULoss', loss_weight=2.0)),
@@ -84,7 +69,6 @@ model = dict(
         nms=dict(type='nms', iou_threshold=0.6),
         max_per_img=100))
 find_unused_parameters=True
-# resume_from = '/data/data1/lxp/open-mmlab/mmdetection/work_dirs/crfsdet_r50_c1/latest.pth'
 img_norm_cfg = dict(
     mean=[46.173172, 46.173172, 46.173172], std=[40.773808, 40.773808, 40.773808], to_rgb=True)
 train_pipeline = [

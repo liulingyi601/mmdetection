@@ -8,28 +8,19 @@ pretrained = 'https://github.com/SwinTransformer/storage/releases/download/v1.0.
 # model settings
 model = dict(
     type='VFNet',
-    backbone=dict(  
-        # _delete_=True,
-        type='SwinTransformer',
-        embed_dims=96,
-        depths=[2, 2, 6,2],
-        num_heads=[3, 6, 12,24],
-        strides=(4, 2, 2,2),
-        window_size=7,
-        mlp_ratio=4,
-        qkv_bias=True,
-        qk_scale=None,
-        drop_rate=0.,
-        attn_drop_rate=0.,
-        drop_path_rate=0.2,
-        patch_norm=True,
+    backbone=dict(
+        type='ResNet',
+        depth=50,
+        num_stages=4,
         out_indices=(0, 1, 2),
-        with_cp=False,
-        convert_weights=True,
-        init_cfg=dict(type='Pretrained', checkpoint=pretrained)),
+        frozen_stages=1,
+        norm_cfg=dict(type='BN', requires_grad=True),
+        norm_eval=True,
+        style='pytorch',
+        init_cfg=dict(type='Pretrained', checkpoint='torchvision://resnet50')),
     neck=dict(
         type='ChannelMapper',
-        in_channels=[96, 192, 384],
+        in_channels=[256, 512, 1024],
         kernel_size=1,
         out_channels=256,
         act_cfg=None,
@@ -37,7 +28,7 @@ model = dict(
         num_outs=3),
     bbox_head=dict(
         type='BGMSTRefineHead',
-        cdf_conv=dict(num_heads=1, num_samples=5, use_pos=True, kernel_size=1),
+        cdf_conv=dict(num_heads=1, num_samples=5, use_pos=True, drop_out=True,kernel_size=1),
         auto_weighted_loss=True,
         sample_weight=True,
         num_classes=1,
@@ -53,7 +44,6 @@ model = dict(
         dcn_on_last_conv=False,
         # use_atss=True,
         use_vfl=True,
-        use_refine_vfl=True,
         anchor_generator=dict(
             type='AnchorGenerator',
             ratios=[1.0],
@@ -104,7 +94,9 @@ train_pipeline = [
     dict(type='DefaultFormatBundle'),
     dict(type='Collect', keys=['img', 'gt_bboxes', 'gt_labels']),
 ]
-data = dict(
+data = dict(    
+    samples_per_gpu=2,
+    workers_per_gpu=2,
     train=dict(pipeline=train_pipeline))
 optimizer = dict(type='SGD', lr=0.005, momentum=0.9, weight_decay=0.0001)
 optimizer_config = dict(grad_clip=None)

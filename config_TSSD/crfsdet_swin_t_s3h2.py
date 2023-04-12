@@ -37,7 +37,7 @@ model = dict(
         num_outs=3),
     bbox_head=dict(
         type='BGMSTRefineHead',
-        cdf_conv=dict(num_heads=1, num_samples=5, use_pos=True, kernel_size=1),
+        cdf_conv=dict(num_heads=2, num_samples=3, use_pos=True, kernel_size=1, dropout=False),
         auto_weighted_loss=True,
         sample_weight=True,
         num_classes=1,
@@ -53,7 +53,6 @@ model = dict(
         dcn_on_last_conv=False,
         # use_atss=True,
         use_vfl=True,
-        use_refine_vfl=True,
         anchor_generator=dict(
             type='AnchorGenerator',
             ratios=[1.0],
