@@ -162,7 +162,18 @@ class BaseDenseHead(BaseModule, metaclass=ABCMeta):
         else:
             # e.g. FCOS, PAA, ATSS, etc.
             with_score_factors = True
-
+        # 保存heatmap
+        # import pdb
+        # pdb.set_trace()
+        # import cv2
+        # import torch.nn.functional as F
+        # im = cv2.imread(img_meta['filename'])
+        # scoremap=(torch.concat([F.interpolate(cls_score_list[0].sigmoid()[None], im.shape[:2], mode='bicubic'), F.interpolate(cls_score_list[1].sigmoid()[None], im.shape[:2], mode='bicubic'),F.interpolate(cls_score_list[2].sigmoid()[None], im.shape[:2], mode='bicubic')]).max(0)[0][0].cpu().detach().numpy()*255).astype('uint8')
+        # scoremap = (scoremap/(scoremap.max()-scoremap.min())*240).astype('uint8')
+        # heatmap=cv2.applyColorMap(scoremap, cv2.COLORMAP_JET)
+        # heatim = cv2.addWeighted(im, 0.5, heatmap, 0.5, 0)
+        # cv2.imwrite('/home/ubuntu/disk/mmdetection/work_dirs/heatmap/'+ img_meta['ori_filename'],heatim)
+        # # pdb.set_trace()
         cfg = self.test_cfg if cfg is None else cfg
         img_shape = img_meta['img_shape']
         nms_pre = cfg.get('nms_pre', -1)
