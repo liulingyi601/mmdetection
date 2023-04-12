@@ -83,7 +83,8 @@ class cross_deformable_conv(BaseModule):
         self.weight_conv = nn.Conv2d(in_channles, self.num_samples * self.num_heads * self.num_levels, self.kernel_size, padding=self.kernel_size//2)
         if self.use_pos:
             # 创建可学习参数
-            self.level_embeds = torch.Tensor(self.num_levels, self.in_channles)
+            
+            self.level_embeds = nn.Parameter(torch.Tensor(self.num_levels, self.in_channles))# type: ignore
         self.norm_layer1 = nn.LayerNorm(in_channles)
         self.norm_layer2 = nn.LayerNorm(in_channles)
         if self.dropout is not None:
@@ -302,7 +303,7 @@ class BGMSTRefineHead(FCOSHead):
         self.cls_conv = nn.Conv2d(self.feat_channels, self.feat_channels, 1)
 
         if self.auto_weighted_loss:
-            self.auto_loss_weights = torch.zeros(3)
+            self.auto_loss_weights = nn.Parameter(torch.zeros(3))# type: ignore
 
 
     def forward(self, feats):
@@ -722,9 +723,7 @@ class BGMSTRefineHead(FCOSHead):
                 neg_inds (Tensor): Indices of negative anchor with shape
                     (num_neg,).
         """
-        inside_flags = anchor_inside_flags(flat_anchors, valid_flags,
-                                           img_meta['img_shape'][:2],
-                                           self.train_cfg.allowed_border)
+        inside_flags = anchor_inside_flags(flat_anchors, valid_flags, img_meta['img_shape'][:2], self.train_cfg.allowed_border) #type: ignore
         if not inside_flags.any():
             return (None, ) * 7
         anchors = flat_anchors[inside_flags, :]
