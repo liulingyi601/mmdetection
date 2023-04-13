@@ -162,7 +162,6 @@ class BaseDenseHead(BaseModule, metaclass=ABCMeta):
         else:
             # e.g. FCOS, PAA, ATSS, etc.
             with_score_factors = True
-        # 保存heatmap
         # import pdb
         # pdb.set_trace()
         # import cv2
